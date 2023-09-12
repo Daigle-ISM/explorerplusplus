@@ -20,16 +20,21 @@ namespace Applications
 namespace ApplicationToolbarHelper
 {
 
+ApplicationInfo ParseCommandString(const std::wstring &command)
+{
+	return ParseCommandString(command, {});
+}
 // Takes a command string entered by the user, and splits it up into two components: an application
 // path (with any environment strings expanded) and a parameter list.
 //
 // Two supported styles:
 // 1. "[command]" [parameters] (needed if the command contains spaces)
 // 2. [command] [parameters]
-ApplicationInfo ParseCommandString(const std::wstring &command)
+ApplicationInfo ParseCommandString(const std::wstring &command, const std::wstring &currentDir)
 {
 	std::wstring trimmedCommand = command;
 	boost::trim(trimmedCommand);
+	boost::replace_all(trimmedCommand, L"%V", currentDir);
 
 	if (trimmedCommand.empty())
 	{
@@ -86,7 +91,7 @@ ApplicationInfo ParseCommandString(const std::wstring &command)
 void OpenApplication(CoreInterface *coreInterface, HWND errorDialogParent,
 	const Application *application, std::wstring extraParameters)
 {
-	ApplicationInfo applicationInfo = ParseCommandString(application->GetCommand());
+	ApplicationInfo applicationInfo = ParseCommandString(application->GetCommand(), coreInterface->GetCurrentFolder());
 
 	unique_pidl_absolute pidl;
 	HRESULT hr = SHParseDisplayName(applicationInfo.application.c_str(), nullptr,

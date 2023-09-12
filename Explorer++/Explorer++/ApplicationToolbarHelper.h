@@ -23,7 +23,10 @@ struct ApplicationInfo
 	std::wstring parameters;
 };
 
+
 ApplicationInfo ParseCommandString(const std::wstring &command);
+
+ApplicationInfo ParseCommandString(const std::wstring &command, const std::wstring &currentDir);
 void OpenApplication(CoreInterface *coreInterface, HWND errorDialogParent,
 	const Application *application, std::wstring extraParameters = {});
 

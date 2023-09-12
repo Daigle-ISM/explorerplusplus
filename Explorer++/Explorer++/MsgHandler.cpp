@@ -1206,6 +1206,11 @@ HWND Explorerplusplus::GetTreeView() const
 	return m_shellTreeView->GetHWND();
 }
 
+std::wstring Explorerplusplus::GetCurrentFolder() const
+{
+	return m_pActiveShellBrowser->GetDirectory();
+}
+
 IDirectoryMonitor *Explorerplusplus::GetDirectoryMonitor() const
 {
 	return m_pDirMon;

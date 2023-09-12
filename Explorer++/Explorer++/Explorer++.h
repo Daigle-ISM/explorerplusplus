@@ -505,6 +505,7 @@ private:
 	TabContainer *GetTabContainer() const override;
 	TabRestorer *GetTabRestorer() const override;
 	HWND GetTreeView() const override;
+	std::wstring GetCurrentFolder() const override;
 	IDirectoryMonitor *GetDirectoryMonitor() const override;
 	IconResourceLoader *GetIconResourceLoader() const override;
 	CachedIcons *GetCachedIcons() override;

@@ -93,7 +93,10 @@ public:
 
 	virtual StatusBar *GetStatusBar() = 0;
 
+	virtual std::wstring GetCurrentFolder() const = 0;
+
 	virtual void OpenFileItem(PCIDLIST_ABSOLUTE pidlItem, const TCHAR *szParameters) = 0;
+
 
 	virtual wil::unique_hmenu BuildViewsMenu() = 0;
 
