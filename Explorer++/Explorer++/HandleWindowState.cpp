@@ -5,6 +5,7 @@
 #include "stdafx.h"
 #include "Explorer++.h"
 #include "Config.h"
+#include "FeatureList.h"
 #include "MainResource.h"
 #include "ShellBrowser/ShellBrowser.h"
 #include "ShellBrowser/ShellNavigationController.h"
@@ -26,7 +27,7 @@ void Explorerplusplus::UpdateWindowStates(const Tab &tab)
  */
 void Explorerplusplus::SetProgramMenuItemStates(HMENU hProgramMenu)
 {
-	const Tab &tab = m_tabContainer->GetSelectedTab();
+	const Tab &tab = GetActivePane()->GetTabContainer()->GetSelectedTab();
 
 	ViewMode viewMode = tab.GetShellBrowser()->GetViewMode();
 	bool virtualFolder = tab.GetShellBrowser()->InVirtualFolder();
@@ -64,6 +65,11 @@ void Explorerplusplus::SetProgramMenuItemStates(HMENU hProgramMenu)
 	MenuHelper::EnableItem(hProgramMenu, IDM_EDIT_WILDCARDDESELECT, anySelected);
 	MenuHelper::EnableItem(hProgramMenu, IDM_EDIT_SELECTNONE, anySelected);
 	MenuHelper::EnableItem(hProgramMenu, IDM_EDIT_RESOLVELINK, anySelected);
+
+	if (FeatureList::GetInstance()->IsEnabled(Feature::DualPane))
+	{
+		MenuHelper::CheckItem(hProgramMenu, IDM_VIEW_DUAL_PANE, m_config->dualPane);
+	}
 
 	MenuHelper::CheckItem(hProgramMenu, IDM_VIEW_STATUSBAR, m_config->showStatusBar);
 	MenuHelper::CheckItem(hProgramMenu, IDM_VIEW_FOLDERS, m_config->showFolders.get());

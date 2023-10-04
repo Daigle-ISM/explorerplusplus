@@ -9,6 +9,7 @@
 #include "Bookmarks/UI/BookmarksMainMenu.h"
 #include "Config.h"
 #include "Explorer++_internal.h"
+#include "FeatureList.h"
 #include "MainFontSetter.h"
 #include "MenuRanges.h"
 #include "Plugins/PluginManager.h"
@@ -44,6 +45,7 @@ Explorerplusplus::Explorerplusplus(HWND hwnd, CommandLine::Settings *commandLine
 	m_resourceInstance = nullptr;
 
 	m_config = std::make_shared<Config>();
+	FeatureList::GetInstance()->InitializeFromCommandLine(*commandLineSettings);
 
 	m_bSavePreferencesToXMLFile = FALSE;
 	m_bAttemptToolbarRestore = false;
@@ -57,7 +59,6 @@ Explorerplusplus::Explorerplusplus(HWND hwnd, CommandLine::Settings *commandLine
 	m_hDisplayWindow = nullptr;
 	m_lastActiveWindow = nullptr;
 	m_hActiveListView = nullptr;
-	m_zDeltaTotal = 0;
 	m_InitializationFinished.set(false);
 
 	m_iDWFolderSizeUniqueId = 0;

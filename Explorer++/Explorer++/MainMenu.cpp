@@ -5,6 +5,7 @@
 #include "stdafx.h"
 #include "Explorer++.h"
 #include "Bookmarks/UI/BookmarksMainMenu.h"
+#include "FeatureList.h"
 #include "Icon.h"
 #include "MainResource.h"
 #include "ResourceHelper.h"
@@ -61,7 +62,12 @@ void Explorerplusplus::InitializeMainMenu()
 	// before the tabs are restored.
 	HMENU mainMenu = LoadMenu(m_resourceInstance, MAKEINTRESOURCE(IDR_MAINMENU));
 
-	if (!m_commandLineSettings.enablePlugins)
+	if (!FeatureList::GetInstance()->IsEnabled(Feature::DualPane))
+	{
+		DeleteMenu(mainMenu, IDM_VIEW_DUAL_PANE, MF_BYCOMMAND);
+	}
+
+	if (!FeatureList::GetInstance()->IsEnabled(Feature::Plugins))
 	{
 		DeleteMenu(mainMenu, IDM_TOOLS_RUNSCRIPT, MF_BYCOMMAND);
 	}

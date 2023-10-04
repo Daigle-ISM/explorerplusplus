@@ -65,7 +65,7 @@ void Explorerplusplus::SetListViewInitialPosition(HWND hListView)
 	indentTop = indentRebar;
 
 	RECT tabWindowRect;
-	GetClientRect(m_tabContainer->GetHWND(), &tabWindowRect);
+	GetClientRect(GetActivePane()->GetTabContainer()->GetHWND(), &tabWindowRect);
 
 	int tabWindowHeight = GetRectHeight(&tabWindowRect);
 
@@ -108,4 +108,9 @@ void Explorerplusplus::UpdateLayout()
 	RECT rc;
 	GetClientRect(m_hContainer, &rc);
 	SendMessage(m_hContainer, WM_SIZE, SIZE_RESTORED, MAKELPARAM(rc.right, rc.bottom));
+}
+
+void Explorerplusplus::ToggleDualPane()
+{
+	m_config->dualPane = !m_config->dualPane;
 }

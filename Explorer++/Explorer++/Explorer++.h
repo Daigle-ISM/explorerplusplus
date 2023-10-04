@@ -5,6 +5,7 @@
 #pragma once
 
 #include "AcceleratorUpdater.h"
+#include "BrowserPane.h"
 #include "CommandLine.h"
 #include "CoreInterface.h"
 #include "Literals.h"
@@ -294,6 +295,8 @@ private:
 		LPARAM lParam);
 	void OnTreeViewSelectionChangedTimer();
 
+	BrowserPane *GetActivePane() const;
+
 	/* Tab backing. */
 	void CreateTabBacking();
 	void OnTabsInitialized();
@@ -415,6 +418,7 @@ private:
 	void ToggleFolders();
 	void UpdateLayout();
 	void OnTreeViewHolderResized(int newWidth);
+	void ToggleDualPane();
 
 	// Status bar
 	void CreateStatusBar();
@@ -555,7 +559,6 @@ private:
 	/* Miscellaneous. */
 	void InitializeDisplayWindow();
 	void ShowMainRebarBand(HWND hwnd, BOOL bShow);
-	BOOL OnMouseWheel(MousewheelSource mousewheelSource, WPARAM wParam, LPARAM lParam) override;
 	StatusBar *GetStatusBar() override;
 	void StartDirectoryMonitoringForTab(const Tab &tab);
 	void StopDirectoryMonitoringForTab(const Tab &tab);
@@ -615,8 +618,9 @@ private:
 	std::optional<NMTREEVIEW> m_treeViewSelectionChangedEventInfo;
 	bool m_treeViewInitialized = false;
 
+	std::unique_ptr<BrowserPane> m_browserPane;
+
 	/* Tabs. */
-	TabContainer *m_tabContainer;
 	std::unique_ptr<MainFontSetter> m_tabToolbarTooltipFontSetter;
 	wil::unique_hbrush m_tabBarBackgroundBrush;
 	std::unique_ptr<TabRestorer> m_tabRestorer;
@@ -688,9 +692,6 @@ private:
 
 	/* Menu images. */
 	std::vector<wil::unique_hbitmap> m_menuImages;
-
-	/* Mousewheel. */
-	int m_zDeltaTotal;
 
 	// WM_DEVICECHANGE notifications
 	DeviceChangeSignal m_deviceChangeSignal;

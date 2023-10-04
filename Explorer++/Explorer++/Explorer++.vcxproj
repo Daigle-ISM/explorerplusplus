@@ -742,6 +742,7 @@
     <ClCompile Include="Bookmarks\UI\BookmarksToolbar.cpp" />
     <ClCompile Include="Bookmarks\UI\Views\BookmarksToolbarView.cpp" />
     <ClCompile Include="Bookmarks\UI\BookmarkMenuDropTarget.cpp" />
+    <ClCompile Include="BrowserPane.cpp" />
     <ClCompile Include="ColorRule.cpp" />
     <ClCompile Include="ColorRuleListView.cpp" />
     <ClCompile Include="ColorRuleModelFactory.cpp" />
@@ -750,6 +751,7 @@
     <ClCompile Include="CrashHandlerHelper.cpp" />
     <ClCompile Include="CustomFont.cpp" />
     <ClCompile Include="CustomFontStorage.cpp" />
+    <ClCompile Include="FeatureList.cpp" />
     <ClCompile Include="FontsOptionsPage.cpp" />
     <ClCompile Include="MainFontSetter.cpp" />
     <ClCompile Include="FontHelper.cpp" />
@@ -955,6 +957,7 @@
     <ClInclude Include="Bookmarks\UI\BookmarksToolbar.h" />
     <ClInclude Include="Bookmarks\UI\Views\BookmarksToolbarView.h" />
     <ClInclude Include="Bookmarks\UI\BookmarkMenuDropTarget.h" />
+    <ClInclude Include="BrowserPane.h" />
     <ClInclude Include="ColorRule.h" />
     <ClInclude Include="ColorRuleListView.h" />
     <ClInclude Include="ColorRuleModel.h" />
@@ -964,6 +967,8 @@
     <ClInclude Include="CrashHandlerHelper.h" />
     <ClInclude Include="CustomFont.h" />
     <ClInclude Include="CustomFontStorage.h" />
+    <ClInclude Include="Feature.h" />
+    <ClInclude Include="FeatureList.h" />
     <ClInclude Include="FontsOptionsPage.h" />
     <ClInclude Include="Literals.h" />
     <ClInclude Include="MainFontSetter.h" />
