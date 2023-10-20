@@ -76,6 +76,12 @@ ApplicationInfo ParseCommandString(const std::wstring &command, const std::wstri
 		finalApplicationPath = *expandedApplicationPath;
 	}
 
+	wchar_t fullPath[MAX_PATH] = {};
+	if (SearchPath(nullptr, &finalApplicationPath.at(0), L".exe", MAX_PATH, &fullPath[0], nullptr) > 0)
+	{
+		finalApplicationPath = &fullPath[0];
+	}
+
 	ApplicationInfo applicationInfo;
 	applicationInfo.application = finalApplicationPath;
 
