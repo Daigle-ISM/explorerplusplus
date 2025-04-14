@@ -4,14 +4,13 @@
 
 #include "pch.h"
 #include "../Helper/ShellHelper.h"
+#include "ShellTestHelper.h"
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <wil/com.h>
 #include <ShlObj.h>
 
 using namespace testing;
-
-void TestArePidlsEquivalent(const std::wstring &path1, const std::wstring &path2, bool equivalent);
 
 class TransformPathTest : public Test
 {
@@ -98,6 +97,15 @@ TEST_F(TransformPathTest, AbsolutePath)
 	// A shell folder path.
 	PerformTest(L"shell:downloads", currentDirectory, L"shell:downloads");
 
+	// A search-ms: URL that represents a search results folder.
+	PerformTest(
+		L"search-ms:displayname=Search%20Results&crumb=fileextension%3A~<*.txt&crumb=location:C%3A%5CUsers%5CDefault",
+		currentDirectory,
+		L"search-ms:displayname=Search%20Results&crumb=fileextension%3A~<*.txt&crumb=location:C%3A%5CUsers%5CDefault");
+
+	// An FTP path.
+	PerformTest(L"ftp://127.0.0.1/", currentDirectory, L"ftp://127.0.0.1/");
+
 	// Paths that are separated by forward slashes, rather than backslashes.
 	PerformTest(L"c:/users/public", currentDirectory, L"c:\\users\\public");
 	PerformTest(L"\\nested/directory", L"d:\\path\\to\\item", L"d:\\nested\\directory");
@@ -136,6 +144,14 @@ TEST_F(TransformPathTest, Normalization)
 	// It's not valid to try and perform normalization on a path like this. That is, this shouldn't
 	// be transformed into "shell:public".
 	PerformTest(L"shell:public\\subfolder\\..", currentDirectory, L"shell:public\\subfolder\\..");
+
+	// Normalization shouldn't be performed on search-ms: URLs either.
+	PerformTest(
+		L"search-ms:displayname=Search%20Results&crumb=fileextension%3A~<*.txt&crumb=location:C%3A%5CUsers%5CDefault\\..",
+		currentDirectory,
+		L"search-ms:displayname=Search%20Results&crumb=fileextension%3A~<*.txt&crumb=location:C%3A%5CUsers%5CDefault\\..");
+
+	PerformTest(L"ftp://127.0.0.1/directory/..", currentDirectory, L"ftp://127.0.0.1/directory/..");
 }
 
 TEST_F(TransformPathTest, Whitespace)
@@ -164,20 +180,11 @@ TEST_F(TransformPathTest, Whitespace)
 class CreateSimplePidlTest : public TestWithParam<ShellItemType>
 {
 protected:
-	void SetUp() override
+	CreateSimplePidlTest()
 	{
-		// This is needed for SHCreateItemFromIDList.
-		HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-		ASSERT_HRESULT_SUCCEEDED(hr);
-
 		m_parentPath = L"c:\\path\\to";
 		m_itemName = L"item";
 		m_itemPath = m_parentPath + L"\\" + m_itemName;
-	}
-
-	void TearDown() override
-	{
-		CoUninitialize();
 	}
 
 	static void TestPidlProperties(PCIDLIST_ABSOLUTE pidl, const std::wstring &itemPath,
@@ -210,29 +217,20 @@ protected:
 
 TEST_P(CreateSimplePidlTest, Absolute)
 {
-	unique_pidl_absolute pidl;
-	HRESULT hr = CreateSimplePidl(m_itemPath, wil::out_param(pidl), nullptr, GetParam());
-	ASSERT_HRESULT_SUCCEEDED(hr);
-
-	TestPidlProperties(pidl.get(), m_itemPath, m_itemName, GetParam());
+	PidlAbsolute pidl = CreateSimplePidlForTest(m_itemPath, nullptr, GetParam());
+	TestPidlProperties(pidl.Raw(), m_itemPath, m_itemName, GetParam());
 }
 
 TEST_P(CreateSimplePidlTest, Relative)
 {
-	unique_pidl_absolute pidlParent;
-	HRESULT hr =
-		CreateSimplePidl(m_parentPath, wil::out_param(pidlParent), nullptr, ShellItemType::Folder);
-	ASSERT_HRESULT_SUCCEEDED(hr);
+	PidlAbsolute pidlParent = CreateSimplePidlForTest(m_parentPath, nullptr, ShellItemType::Folder);
 
 	wil::com_ptr_nothrow<IShellFolder> parent;
-	hr = SHBindToObject(nullptr, pidlParent.get(), nullptr, IID_PPV_ARGS(&parent));
+	HRESULT hr = SHBindToObject(nullptr, pidlParent.Raw(), nullptr, IID_PPV_ARGS(&parent));
 	ASSERT_HRESULT_SUCCEEDED(hr);
 
-	unique_pidl_absolute pidl;
-	hr = CreateSimplePidl(m_itemName, wil::out_param(pidl), parent.get(), GetParam());
-	ASSERT_HRESULT_SUCCEEDED(hr);
-
-	TestPidlProperties(pidl.get(), m_itemPath, m_itemName, GetParam());
+	PidlAbsolute pidl = CreateSimplePidlForTest(m_itemName, parent.get(), GetParam());
+	TestPidlProperties(pidl.Raw(), m_itemPath, m_itemName, GetParam());
 }
 
 INSTANTIATE_TEST_SUITE_P(FileAndFolder, CreateSimplePidlTest,
@@ -258,11 +256,9 @@ TEST(IsPathGUID, NonGUIDPath)
 
 TEST(IsNamespaceRoot, NonRoot)
 {
-	unique_pidl_absolute pidl;
-	HRESULT hr = CreateSimplePidl(L"c:\\", wil::out_param(pidl));
-	ASSERT_HRESULT_SUCCEEDED(hr);
+	PidlAbsolute pidl = CreateSimplePidlForTest(L"c:\\");
 
-	BOOL res = IsNamespaceRoot(pidl.get());
+	BOOL res = IsNamespaceRoot(pidl.Raw());
 	EXPECT_FALSE(res);
 }
 
@@ -276,42 +272,34 @@ TEST(IsNamespaceRoot, Root)
 	EXPECT_TRUE(res);
 }
 
-TEST(ArePidlsEquivalent, Same)
-{
-	TestArePidlsEquivalent(L"c:\\", L"c:\\", true);
-	TestArePidlsEquivalent(L"c:\\users\\public", L"c:\\users\\public", true);
-}
-
-TEST(ArePidlsEquivalent, Different)
-{
-	TestArePidlsEquivalent(L"c:\\", L"c:\\windows", false);
-	TestArePidlsEquivalent(L"c:\\", L"d:\\path\\to\\item", false);
-}
-
-void TestArePidlsEquivalent(const std::wstring &path1, const std::wstring &path2, bool equivalent)
-{
-	unique_pidl_absolute pidl1;
-	HRESULT hr = CreateSimplePidl(path1, wil::out_param(pidl1));
-	ASSERT_HRESULT_SUCCEEDED(hr);
-
-	unique_pidl_absolute pidl2;
-	hr = CreateSimplePidl(path2, wil::out_param(pidl2));
-	ASSERT_HRESULT_SUCCEEDED(hr);
-
-	BOOL res = ArePidlsEquivalent(pidl1.get(), pidl2.get());
-	EXPECT_EQ(res, equivalent);
-}
-
 TEST(GetDisplayName, ParsingName)
 {
-	unique_pidl_absolute pidl;
 	std::wstring pidlPath = L"c:\\path\\to\\file.txt";
-	HRESULT hr = CreateSimplePidl(pidlPath, wil::out_param(pidl));
-	ASSERT_HRESULT_SUCCEEDED(hr);
+	PidlAbsolute pidl = CreateSimplePidlForTest(pidlPath);
 
 	std::wstring parsingName;
-	hr = GetDisplayName(pidl.get(), SHGDN_FORPARSING, parsingName);
+	HRESULT hr = GetDisplayName(pidl.Raw(), SHGDN_FORPARSING, parsingName);
 	ASSERT_HRESULT_SUCCEEDED(hr);
 
 	EXPECT_THAT(parsingName, StrCaseEq(pidlPath));
+}
+
+class ExtractShellIconPartsTest : public Test
+{
+protected:
+	void CheckExtraction(int iconIndex, int overlayIndex)
+	{
+		static_assert(sizeof(int) == 4);
+		auto iconInfo = ExtractShellIconParts(iconIndex | (overlayIndex << 24));
+		EXPECT_EQ(iconInfo.iconIndex, iconIndex);
+		EXPECT_EQ(iconInfo.overlayIndex, overlayIndex);
+	}
+};
+
+TEST_F(ExtractShellIconPartsTest, Extract)
+{
+	CheckExtraction(2, 0);
+	CheckExtraction(53, 0);
+	CheckExtraction(3, 1);
+	CheckExtraction(21, 5);
 }

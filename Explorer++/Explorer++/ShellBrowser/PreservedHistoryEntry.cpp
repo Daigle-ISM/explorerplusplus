@@ -4,13 +4,12 @@
 
 #include "stdafx.h"
 #include "PreservedHistoryEntry.h"
-#include "HistoryEntry.h"
 
-PreservedHistoryEntry::PreservedHistoryEntry(const HistoryEntry &entry) :
-	id(entry.GetId()),
-	pidl(ILCloneFull(entry.GetPidl().get())),
-	displayName(entry.GetDisplayName()),
-	fullPathForDisplay(entry.GetFullPathForDisplay()),
-	systemIconIndex(entry.GetSystemIconIndex())
+PreservedHistoryEntry::PreservedHistoryEntry(const PidlAbsolute &pidl) : m_pidl(pidl)
 {
+}
+
+const PidlAbsolute &PreservedHistoryEntry::GetPidl() const
+{
+	return m_pidl;
 }

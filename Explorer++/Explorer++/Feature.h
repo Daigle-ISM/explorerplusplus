@@ -4,11 +4,22 @@
 
 #pragma once
 
-#include "BetterEnumsWrapper.h"
+#include "../Helper/BetterEnumsWrapper.h"
 
 // clang-format off
 BETTER_ENUM(Feature, int,
 	DualPane,
-	Plugins
+	Plugins,
+
+	// When enabled, the quick access folder in the treeview will be automatically updated.
+	AutomaticQuickAccessUpdates,
+
+	// When enabled, the application will allow multiple windows to be created and restored in each
+	// session, rather than just a single window.
+	MultipleWindowsPerSession,
+
+	// When enabled, directory enumeration will be performed on a background thread, rather than the
+	// main thread.
+	BackgroundThreadEnumeration
 )
 // clang-format on

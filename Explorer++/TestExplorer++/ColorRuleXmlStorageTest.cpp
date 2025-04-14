@@ -5,10 +5,10 @@
 #include "pch.h"
 #include "ColorRuleXmlStorage.h"
 #include "ColorRuleModel.h"
-#include "ColorRulesStorageHelper.h"
+#include "ColorRulesStorageTestHelper.h"
 #include "MovableModelHelper.h"
-#include "ResourceHelper.h"
-#include "XmlStorageHelper.h"
+#include "ResourceTestHelper.h"
+#include "XmlStorageTestHelper.h"
 #include <gtest/gtest.h>
 
 using namespace testing;
@@ -23,11 +23,10 @@ TEST_F(ColorRuleXmlStorageTest, Load)
 	BuildLoadSaveReferenceModel(&referenceModel);
 
 	std::wstring xmlFilePath = GetResourcePath(L"color-rules-config.xml");
-	auto xmlDocument = LoadXmlDocument(xmlFilePath);
-	ASSERT_TRUE(xmlDocument);
+	auto xmlDocumentData = LoadXmlDocument(xmlFilePath);
 
 	ColorRuleModel loadedModel;
-	ColorRuleXmlStorage::Load(xmlDocument.get(), &loadedModel);
+	ColorRuleXmlStorage::Load(xmlDocumentData.rootNode.get(), &loadedModel);
 
 	EXPECT_EQ(loadedModel, referenceModel);
 }
@@ -38,13 +37,12 @@ TEST_F(ColorRuleXmlStorageTest, Save)
 	BuildLoadSaveReferenceModel(&referenceModel);
 
 	auto xmlDocumentData = CreateXmlDocument();
-	ASSERT_TRUE(xmlDocumentData);
 
-	ColorRuleXmlStorage::Save(xmlDocumentData->xmlDocument.get(), xmlDocumentData->root.get(),
+	ColorRuleXmlStorage::Save(xmlDocumentData.xmlDocument.get(), xmlDocumentData.rootNode.get(),
 		&referenceModel);
 
 	ColorRuleModel loadedModel;
-	ColorRuleXmlStorage::Load(xmlDocumentData->xmlDocument.get(), &loadedModel);
+	ColorRuleXmlStorage::Load(xmlDocumentData.rootNode.get(), &loadedModel);
 
 	EXPECT_EQ(loadedModel, referenceModel);
 }

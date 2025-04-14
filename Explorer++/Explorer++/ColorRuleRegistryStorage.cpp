@@ -13,13 +13,13 @@ namespace ColorRuleRegistryStorage
 namespace
 {
 
-const TCHAR COLOR_RULES_KEY_PATH[] = _T("ColorRules");
+const wchar_t COLOR_RULES_KEY_PATH[] = L"ColorRules";
 
-const TCHAR SETTING_DESCRIPTION[] = _T("Description");
-const TCHAR SETTING_FILENAME_PATTERN[] = _T("FilenamePattern");
-const TCHAR SETTING_CASE_INSENSITIVE[] = _T("CaseInsensitive");
-const TCHAR SETTING_ATTRIBUTES[] = _T("Attributes");
-const TCHAR SETTING_COLOR[] = _T("Color");
+const wchar_t SETTING_DESCRIPTION[] = L"Description";
+const wchar_t SETTING_FILENAME_PATTERN[] = L"FilenamePattern";
+const wchar_t SETTING_CASE_INSENSITIVE[] = L"CaseInsensitive";
+const wchar_t SETTING_ATTRIBUTES[] = L"Attributes";
+const wchar_t SETTING_COLOR[] = L"Color";
 
 std::unique_ptr<ColorRule> LoadColorRule(HKEY key)
 {
@@ -121,11 +121,10 @@ void SaveToKey(HKEY parentKey, const ColorRuleModel *model)
 
 }
 
-void Load(const std::wstring &mainKeyPath, ColorRuleModel *model)
+void Load(HKEY applicationKey, ColorRuleModel *model)
 {
 	wil::unique_hkey colorRulesKey;
-	std::wstring fullKeyPath = mainKeyPath + L"\\" + COLOR_RULES_KEY_PATH;
-	LSTATUS res = RegOpenKeyEx(HKEY_CURRENT_USER, fullKeyPath.c_str(), 0, KEY_READ, &colorRulesKey);
+	LSTATUS res = RegOpenKeyEx(applicationKey, COLOR_RULES_KEY_PATH, 0, KEY_READ, &colorRulesKey);
 
 	if (res == ERROR_SUCCESS)
 	{
@@ -135,13 +134,10 @@ void Load(const std::wstring &mainKeyPath, ColorRuleModel *model)
 	}
 }
 
-void Save(const std::wstring &mainKeyPath, const ColorRuleModel *model)
+void Save(HKEY applicationKey, const ColorRuleModel *model)
 {
-	std::wstring fullKeyPath = mainKeyPath + L"\\" + COLOR_RULES_KEY_PATH;
-	SHDeleteKey(HKEY_CURRENT_USER, fullKeyPath.c_str());
-
 	wil::unique_hkey colorRulesKey;
-	LSTATUS res = RegCreateKeyEx(HKEY_CURRENT_USER, fullKeyPath.c_str(), 0, nullptr,
+	LSTATUS res = RegCreateKeyEx(applicationKey, COLOR_RULES_KEY_PATH, 0, nullptr,
 		REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &colorRulesKey, nullptr);
 
 	if (res == ERROR_SUCCESS)

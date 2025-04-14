@@ -3,18 +3,21 @@
 // See LICENSE in the top level directory
 
 #include "stdafx.h"
-#include "ShellBrowser.h"
+#include "ShellBrowserImpl.h"
+#include "App.h"
 #include "Config.h"
 #include "ItemData.h"
+#include "NavigateParams.h"
+#include "Runtime.h"
+#include "RuntimeHelper.h"
 #include "ShellNavigationController.h"
 #include "ViewModes.h"
 #include "../Helper/ListViewHelper.h"
-#include "../Helper/Logging.h"
-#include "../Helper/Macros.h"
+#include "../Helper/ScopedRedrawDisabler.h"
 #include "../Helper/ShellHelper.h"
 #include <list>
 
-void ShellBrowser::StartDirectoryMonitoring(PCIDLIST_ABSOLUTE pidl)
+void ShellBrowserImpl::StartDirectoryMonitoring(PCIDLIST_ABSOLUTE pidl)
 {
 	// Shouldn't be monitoring the same directory with both directory modification notifications and
 	// shell change notifications.
@@ -24,31 +27,51 @@ void ShellBrowser::StartDirectoryMonitoring(PCIDLIST_ABSOLUTE pidl)
 		SHCNE_ATTRIBUTES | SHCNE_CREATE | SHCNE_DELETE | SHCNE_MKDIR | SHCNE_RENAMEFOLDER
 			| SHCNE_RENAMEITEM | SHCNE_RMDIR | SHCNE_UPDATEDIR | SHCNE_UPDATEITEM | SHCNE_DRIVEADD
 			| SHCNE_DRIVEREMOVED);
+
+	unique_pidl_absolute rootPidl;
+	HRESULT hr = GetRootPidl(wil::out_param(rootPidl));
+
+	if (SUCCEEDED(hr))
+	{
+		// Monitoring a folder allows direct deletion of the folder to be detected. In that case, a
+		// SHCNE_RMDIR notification will be sent.
+		// It doesn't, however, allow indirect deletion to be detected. For example, if a parent
+		// folder is deleted or renamed, no notification will be sent.
+		// Therefore, it's necessary to globally monitor SHCNE_RMDIR notifications here, to detect
+		// when a parent folder is deleted. It's also necessary to globally monitor SHCNE_UPDATEDIR
+		// notifications, for at least two reasons:
+		//
+		// 1. SHCNE_RMDIR isn't sent consistently. It may or may not be sent when a parent folder is
+		// deleted.
+		// 2. When a parent folder is renamed, only a SHCNE_UPDATEDIR notification will be sent.
+		//
+		// This pair of notifications is also what Explorer uses to navigate away from a folder that
+		// no longer exists.
+		m_shellChangeWatcher.StartWatching(rootPidl.get(), SHCNE_RMDIR | SHCNE_UPDATEDIR, true);
+	}
 }
 
-void ShellBrowser::ProcessShellChangeNotifications(
+void ShellBrowserImpl::ProcessShellChangeNotifications(
 	const std::vector<ShellChangeNotification> &shellChangeNotifications)
 {
-	SendMessage(m_hListView, WM_SETREDRAW, FALSE, NULL);
+	ScopedRedrawDisabler redrawDisabler(m_hListView);
 
 	for (const auto &change : shellChangeNotifications)
 	{
 		ProcessShellChangeNotification(change);
 	}
 
-	SendMessage(m_hListView, WM_SETREDRAW, TRUE, NULL);
-
-	directoryModified.m_signal();
+	m_app->GetShellBrowserEvents()->NotifyDirectoryContentsChanged(this);
 }
 
-void ShellBrowser::ProcessShellChangeNotification(const ShellChangeNotification &change)
+void ShellBrowserImpl::ProcessShellChangeNotification(const ShellChangeNotification &change)
 {
 	switch (change.event)
 	{
 	case SHCNE_DRIVEADD:
 	case SHCNE_MKDIR:
 	case SHCNE_CREATE:
-		if (ILIsParent(m_directoryState.pidlDirectory.get(), change.pidl1.get(), TRUE))
+		if (ILIsParent(m_directoryState.pidlDirectory.Raw(), change.pidl1.get(), TRUE))
 		{
 			OnItemAdded(change.pidl1.get());
 		}
@@ -56,24 +79,50 @@ void ShellBrowser::ProcessShellChangeNotification(const ShellChangeNotification 
 
 	case SHCNE_RENAMEFOLDER:
 	case SHCNE_RENAMEITEM:
-		if (ILIsParent(m_directoryState.pidlDirectory.get(), change.pidl1.get(), TRUE)
-			&& ILIsParent(m_directoryState.pidlDirectory.get(), change.pidl2.get(), TRUE))
+		if (ILIsParent(m_directoryState.pidlDirectory.Raw(), change.pidl1.get(), TRUE)
+			&& ILIsParent(m_directoryState.pidlDirectory.Raw(), change.pidl2.get(), TRUE))
 		{
 			OnItemRenamed(change.pidl1.get(), change.pidl2.get());
+		}
+		else if (ArePidlsEquivalent(m_directoryState.pidlDirectory.Raw(), change.pidl1.get()))
+		{
+			OnCurrentDirectoryRenamed(m_weakPtrFactory.GetWeakPtr(), change.pidl2.get(),
+				m_app->GetRuntime());
 		}
 		break;
 
 	case SHCNE_UPDATEITEM:
-		if (ILIsParent(m_directoryState.pidlDirectory.get(), change.pidl1.get(), TRUE))
+		if (ILIsParent(m_directoryState.pidlDirectory.Raw(), change.pidl1.get(), TRUE))
 		{
 			OnItemModified(change.pidl1.get());
+		}
+		else if (ArePidlsEquivalent(m_directoryState.pidlDirectory.Raw(), change.pidl1.get()))
+		{
+			// This can be triggered in the following sorts of situations:
+			//
+			// - If the icon for the folder is changed.
+			// - If the folder is virtual (e.g. the recycle bin) and the name is changed.
+			OnDirectoryPropertiesChanged(m_weakPtrFactory.GetWeakPtr(),
+				m_directoryState.pidlDirectory, m_app->GetRuntime());
 		}
 		break;
 
 	case SHCNE_UPDATEDIR:
-		if (ArePidlsEquivalent(m_directoryState.pidlDirectory.get(), change.pidl1.get()))
+		if (ArePidlsEquivalent(m_directoryState.pidlDirectory.Raw(), change.pidl1.get()))
 		{
-			m_navigationController->Refresh();
+			// It's not safe to perform an immediate refresh here, since doing so would clear
+			// ShellChangeWatcher::m_shellChangeNotifications, which is being actively iterated
+			// through. Therefore, the function below will perform the refresh asynchronously.
+			RefreshDirectoryAfterUpdate(m_weakPtrFactory.GetWeakPtr(), m_app->GetRuntime());
+		}
+		else if (ILIsParent(change.pidl1.get(), m_directoryState.pidlDirectory.Raw(), false))
+		{
+			// A parent folder has been updated. It's possible this folder may no longer exist (e.g.
+			// because a parent was renamed or removed). A navigation to a parent item may be
+			// required. It's also possible an unrelated item was updated, in which case no action
+			// will be taken by the function below.
+			NavigateUpToClosestExistingItemIfNecessary(m_weakPtrFactory.GetWeakPtr(),
+				m_directoryState.pidlDirectory, m_app->GetRuntime());
 		}
 		break;
 
@@ -84,19 +133,28 @@ void ShellBrowser::ProcessShellChangeNotification(const ShellChangeNotification 
 		// that directory. However, if the user has just changed directories, a notification could
 		// still come in for the previous directory. Therefore, it's important to verify that the
 		// item is actually a child of the current directory.
-		if (ILIsParent(m_directoryState.pidlDirectory.get(), change.pidl1.get(), TRUE))
+		if (ILIsParent(m_directoryState.pidlDirectory.Raw(), change.pidl1.get(), TRUE))
 		{
 			OnItemRemoved(change.pidl1.get());
+		}
+		else if (ArePidlsEquivalent(m_directoryState.pidlDirectory.Raw(), change.pidl1.get())
+			|| ILIsParent(change.pidl1.get(), m_directoryState.pidlDirectory.Raw(), false))
+		{
+			// The current folder has been deleted, either directly, or by deleting one of its
+			// parents. That makes it necessary to navigate to another folder. For similarity with
+			// Explorer, a navigation to a parent will occur.
+			NavigateUpToClosestExistingItemIfNecessary(m_weakPtrFactory.GetWeakPtr(),
+				m_directoryState.pidlDirectory, m_app->GetRuntime());
 		}
 		break;
 	}
 }
 
-void ShellBrowser::DirectoryAltered()
+void ShellBrowserImpl::DirectoryAltered()
 {
-	EnterCriticalSection(&m_csDirectoryAltered);
+	ScopedRedrawDisabler redrawDisabler(m_hListView);
 
-	SendMessage(m_hListView, WM_SETREDRAW, FALSE, NULL);
+	EnterCriticalSection(&m_csDirectoryAltered);
 
 	// Note that directory change notifications are received asynchronously. That means that, in
 	// each of the cases below, it's not reasonable to assume that the file being referenced
@@ -113,7 +171,7 @@ void ShellBrowser::DirectoryAltered()
 		}
 
 		wil::com_ptr_nothrow<IShellFolder> parent;
-		HRESULT hr = SHBindToObject(nullptr, m_directoryState.pidlDirectory.get(), nullptr,
+		HRESULT hr = SHBindToObject(nullptr, m_directoryState.pidlDirectory.Raw(), nullptr,
 			IID_PPV_ARGS(&parent));
 
 		if (FAILED(hr))
@@ -121,8 +179,8 @@ void ShellBrowser::DirectoryAltered()
 			continue;
 		}
 
-		unique_pidl_absolute simplePidl;
-		hr = CreateSimplePidl(af.szFileName, wil::out_param(simplePidl), parent.get());
+		PidlAbsolute simplePidl;
+		hr = CreateSimplePidl(af.szFileName, simplePidl, parent.get());
 
 		if (FAILED(hr))
 		{
@@ -132,33 +190,31 @@ void ShellBrowser::DirectoryAltered()
 		switch (af.dwAction)
 		{
 		case FILE_ACTION_ADDED:
-			OnItemAdded(simplePidl.get());
+			OnItemAdded(simplePidl.Raw());
 			break;
 
 		case FILE_ACTION_RENAMED_OLD_NAME:
 			assert(!m_renamedItemOldPidl);
-			m_renamedItemOldPidl.reset(ILCloneFull(simplePidl.get()));
+			m_renamedItemOldPidl.reset(ILCloneFull(simplePidl.Raw()));
 			break;
 
 		case FILE_ACTION_RENAMED_NEW_NAME:
-			OnItemRenamed(m_renamedItemOldPidl.get(), simplePidl.get());
+			OnItemRenamed(m_renamedItemOldPidl.get(), simplePidl.Raw());
 
 			m_renamedItemOldPidl.reset();
 			break;
 
 		case FILE_ACTION_MODIFIED:
-			OnItemModified(simplePidl.get());
+			OnItemModified(simplePidl.Raw());
 			break;
 
 		case FILE_ACTION_REMOVED:
-			OnItemRemoved(simplePidl.get());
+			OnItemRemoved(simplePidl.Raw());
 			break;
 		}
 	}
 
-	SendMessage(m_hListView, WM_SETREDRAW, TRUE, NULL);
-
-	directoryModified.m_signal();
+	m_app->GetShellBrowserEvents()->NotifyDirectoryContentsChanged(this);
 
 	m_AlteredList.clear();
 
@@ -175,7 +231,8 @@ void CALLBACK TimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
 	SendMessage(hwnd, WM_USER_FILESADDED, idEvent, 0);
 }
 
-void ShellBrowser::FilesModified(DWORD Action, const TCHAR *FileName, int EventId, int iFolderIndex)
+void ShellBrowserImpl::FilesModified(DWORD Action, const TCHAR *FileName, int EventId,
+	int iFolderIndex)
 {
 	EnterCriticalSection(&m_csDirectoryAltered);
 
@@ -183,7 +240,7 @@ void ShellBrowser::FilesModified(DWORD Action, const TCHAR *FileName, int EventI
 
 	AlteredFile_t af;
 
-	StringCchCopy(af.szFileName, SIZEOF_ARRAY(af.szFileName), FileName);
+	StringCchCopy(af.szFileName, std::size(af.szFileName), FileName);
 	af.dwAction = Action;
 	af.iFolderIndex = iFolderIndex;
 
@@ -192,7 +249,7 @@ void ShellBrowser::FilesModified(DWORD Action, const TCHAR *FileName, int EventI
 	LeaveCriticalSection(&m_csDirectoryAltered);
 }
 
-void ShellBrowser::OnItemAdded(PCIDLIST_ABSOLUTE simplePidl)
+void ShellBrowserImpl::OnItemAdded(PCIDLIST_ABSOLUTE simplePidl)
 {
 	auto existingItemInternalIndex = GetItemInternalIndexForPidl(simplePidl);
 
@@ -207,8 +264,8 @@ void ShellBrowser::OnItemAdded(PCIDLIST_ABSOLUTE simplePidl)
 		return;
 	}
 
-	unique_pidl_absolute pidlFull;
-	HRESULT hr = SimplePidlToFullPidl(simplePidl, wil::out_param(pidlFull));
+	PidlAbsolute pidlFull;
+	HRESULT hr = UpdatePidl(simplePidl, pidlFull);
 
 	PCIDLIST_ABSOLUTE pidl;
 
@@ -221,7 +278,7 @@ void ShellBrowser::OnItemAdded(PCIDLIST_ABSOLUTE simplePidl)
 	// chance for the user to notice that the item details are wrong.
 	if (SUCCEEDED(hr))
 	{
-		pidl = pidlFull.get();
+		pidl = pidlFull.Raw();
 	}
 	else
 	{
@@ -231,7 +288,7 @@ void ShellBrowser::OnItemAdded(PCIDLIST_ABSOLUTE simplePidl)
 	AddItem(pidl);
 }
 
-void ShellBrowser::AddItem(PCIDLIST_ABSOLUTE pidl)
+void ShellBrowserImpl::AddItem(PCIDLIST_ABSOLUTE pidl)
 {
 	wil::com_ptr_nothrow<IShellFolder> shellFolder;
 	PCITEMID_CHILD pidlChild = nullptr;
@@ -242,7 +299,7 @@ void ShellBrowser::AddItem(PCIDLIST_ABSOLUTE pidl)
 		return;
 	}
 
-	auto itemId = AddItemInternal(shellFolder.get(), m_directoryState.pidlDirectory.get(),
+	auto itemId = AddItemInternal(shellFolder.get(), m_directoryState.pidlDirectory.Raw(),
 		pidlChild, -1, FALSE);
 
 	if (!itemId)
@@ -257,13 +314,12 @@ void ShellBrowser::AddItem(PCIDLIST_ABSOLUTE pidl)
 		int sortedPosition = DetermineItemSortedPosition(*itemId);
 
 		auto itr = std::find_if(m_directoryState.awaitingAddList.begin(),
-			m_directoryState.awaitingAddList.end(),
-			[itemId](const AwaitingAdd_t &awaitingItem)
+			m_directoryState.awaitingAddList.end(), [itemId](const AwaitingAdd_t &awaitingItem)
 			{ return *itemId == awaitingItem.iItemInternal; });
 
 		// The item was added successfully above, so should be in the list of awaiting
 		// items.
-		assert(itr != m_directoryState.awaitingAddList.end());
+		CHECK(itr != m_directoryState.awaitingAddList.end());
 
 		itr->iItem = sortedPosition;
 		itr->bPosition = TRUE;
@@ -273,7 +329,7 @@ void ShellBrowser::AddItem(PCIDLIST_ABSOLUTE pidl)
 	InsertAwaitingItems();
 }
 
-void ShellBrowser::OnItemRemoved(PCIDLIST_ABSOLUTE simplePidl)
+void ShellBrowserImpl::OnItemRemoved(PCIDLIST_ABSOLUTE simplePidl)
 {
 	auto internalIndex = GetItemInternalIndexForPidl(simplePidl);
 
@@ -283,10 +339,10 @@ void ShellBrowser::OnItemRemoved(PCIDLIST_ABSOLUTE simplePidl)
 	}
 }
 
-void ShellBrowser::OnItemModified(PCIDLIST_ABSOLUTE simplePidl)
+void ShellBrowserImpl::OnItemModified(PCIDLIST_ABSOLUTE simplePidl)
 {
-	unique_pidl_absolute pidlFull;
-	HRESULT hr = SimplePidlToFullPidl(simplePidl, wil::out_param(pidlFull));
+	PidlAbsolute pidlFull;
+	HRESULT hr = UpdatePidl(simplePidl, pidlFull);
 
 	// SimplePidlToFullPidl may fail if this item no longer exists. However, there's nothing that
 	// can be done in that case. Leaving the previous details in place until the rename/deletion
@@ -294,7 +350,7 @@ void ShellBrowser::OnItemModified(PCIDLIST_ABSOLUTE simplePidl)
 	// rename/deletion notification is likely to be processed soon).
 	if (SUCCEEDED(hr))
 	{
-		UpdateItem(pidlFull.get());
+		UpdateItem(pidlFull.Raw());
 	}
 }
 
@@ -308,7 +364,7 @@ void ShellBrowser::OnItemModified(PCIDLIST_ABSOLUTE simplePidl)
 // When an item is modified, the name shouldn't change, so that does mean that there is at least one
 // difference between the two update types. However, handling both updates in a single method is
 // better than having two very similar methods.
-void ShellBrowser::UpdateItem(PCIDLIST_ABSOLUTE pidl, PCIDLIST_ABSOLUTE updatedPidl)
+void ShellBrowserImpl::UpdateItem(PCIDLIST_ABSOLUTE pidl, PCIDLIST_ABSOLUTE updatedPidl)
 {
 	auto internalIndex = GetItemInternalIndexForPidl(pidl);
 
@@ -338,7 +394,7 @@ void ShellBrowser::UpdateItem(PCIDLIST_ABSOLUTE pidl, PCIDLIST_ABSOLUTE updatedP
 	}
 
 	auto itemInfo =
-		GetItemInformation(shellFolder.get(), m_directoryState.pidlDirectory.get(), pidlChild);
+		GetItemInformation(shellFolder.get(), m_directoryState.pidlDirectory.Raw(), pidlChild);
 
 	if (!itemInfo)
 	{
@@ -351,7 +407,7 @@ void ShellBrowser::UpdateItem(PCIDLIST_ABSOLUTE pidl, PCIDLIST_ABSOLUTE updatedP
 
 	m_directoryState.totalDirSize += newFileSize.QuadPart - oldFileSize.QuadPart;
 
-	m_itemInfoMap[*internalIndex] = std::move(*itemInfo);
+	m_itemInfoMap[*internalIndex] = *itemInfo;
 	const ItemInfo_t &updatedItemInfo = m_itemInfoMap[*internalIndex];
 
 	auto itemIndex = LocateItemByInternalIndex(*internalIndex);
@@ -386,8 +442,10 @@ void ShellBrowser::UpdateItem(PCIDLIST_ABSOLUTE pidl, PCIDLIST_ABSOLUTE updatedP
 	{
 		InvalidateAllColumnsForItem(*itemIndex);
 	}
-	else if (updatedPidl)
+	else
 	{
+		// The display name can change, even if the parsing name is the same. For example, when the
+		// recycle bin is renamed, the parsing name remains the same.
 		BasicItemInfo_t basicItemInfo = getBasicItemInfo(*internalIndex);
 		std::wstring filename = ProcessItemFileName(basicItemInfo, m_config->globalFolderSettings);
 		ListView_SetItemText(m_hListView, *itemIndex, 0, filename.data());
@@ -413,13 +471,14 @@ void ShellBrowser::UpdateItem(PCIDLIST_ABSOLUTE pidl, PCIDLIST_ABSOLUTE updatedP
 	itemIndex.reset();
 }
 
-void ShellBrowser::OnItemRenamed(PCIDLIST_ABSOLUTE simplePidlOld, PCIDLIST_ABSOLUTE simplePidlNew)
+void ShellBrowserImpl::OnItemRenamed(PCIDLIST_ABSOLUTE simplePidlOld,
+	PCIDLIST_ABSOLUTE simplePidlNew)
 {
 	// When an item is updated, the WIN32_FIND_DATA information cached in the pidl will be
 	// retrieved. As the simple pidl won't contain this information, it's important to convert the
 	// pidl to a full pidl here.
-	unique_pidl_absolute pidlNewFull;
-	HRESULT hr = SimplePidlToFullPidl(simplePidlNew, wil::out_param(pidlNewFull));
+	PidlAbsolute pidlNewFull;
+	HRESULT hr = UpdatePidl(simplePidlNew, pidlNewFull);
 
 	PCIDLIST_ABSOLUTE pidlNew;
 
@@ -435,7 +494,7 @@ void ShellBrowser::OnItemRenamed(PCIDLIST_ABSOLUTE simplePidlOld, PCIDLIST_ABSOL
 	// well.
 	if (SUCCEEDED(hr))
 	{
-		pidlNew = pidlNewFull.get();
+		pidlNew = pidlNewFull.Raw();
 	}
 	else
 	{
@@ -445,7 +504,7 @@ void ShellBrowser::OnItemRenamed(PCIDLIST_ABSOLUTE simplePidlOld, PCIDLIST_ABSOL
 	UpdateItem(simplePidlOld, pidlNew);
 }
 
-void ShellBrowser::InvalidateAllColumnsForItem(int itemIndex)
+void ShellBrowserImpl::InvalidateAllColumnsForItem(int itemIndex)
 {
 	if (m_folderSettings.viewMode != +ViewMode::Details)
 	{
@@ -453,7 +512,7 @@ void ShellBrowser::InvalidateAllColumnsForItem(int itemIndex)
 	}
 
 	auto numColumns = std::count_if(m_pActiveColumns->begin(), m_pActiveColumns->end(),
-		[](const Column_t &column) { return column.bChecked; });
+		[](const Column_t &column) { return column.checked; });
 
 	for (int i = 0; i < numColumns; i++)
 	{
@@ -461,7 +520,7 @@ void ShellBrowser::InvalidateAllColumnsForItem(int itemIndex)
 	}
 }
 
-void ShellBrowser::InvalidateIconForItem(int itemIndex)
+void ShellBrowserImpl::InvalidateIconForItem(int itemIndex)
 {
 	LVITEM lvItem;
 	lvItem.mask = LVIF_IMAGE;
@@ -469,4 +528,108 @@ void ShellBrowser::InvalidateIconForItem(int itemIndex)
 	lvItem.iSubItem = 0;
 	lvItem.iImage = I_IMAGECALLBACK;
 	ListView_SetItem(m_hListView, &lvItem);
+}
+
+concurrencpp::null_result ShellBrowserImpl::OnCurrentDirectoryRenamed(
+	WeakPtr<ShellBrowserImpl> weakSelf, PidlAbsolute simplePidlUpdated, Runtime *runtime)
+{
+	co_await ResumeOnComStaThread(runtime);
+
+	PidlAbsolute fullPidlUpdated;
+	HRESULT hr = UpdatePidl(simplePidlUpdated.Raw(), fullPidlUpdated);
+
+	if (FAILED(hr))
+	{
+		co_return;
+	}
+
+	co_await ResumeOnUiThread(runtime);
+
+	if (!weakSelf)
+	{
+		// The folder has changed, or the tab has been closed.
+		co_return;
+	}
+
+	NavigateParams params =
+		NavigateParams::Normal(fullPidlUpdated.Raw(), HistoryEntryType::ReplaceCurrentEntry);
+	params.overrideNavigationTargetMode = true;
+	weakSelf->m_navigationController->Navigate(params);
+}
+
+concurrencpp::null_result ShellBrowserImpl::OnDirectoryPropertiesChanged(
+	WeakPtr<ShellBrowserImpl> weakSelf, PidlAbsolute currentDirectory, Runtime *runtime)
+{
+	co_await ResumeOnComStaThread(runtime);
+
+	PidlAbsolute updatedPidl;
+	HRESULT hr = UpdatePidl(currentDirectory.Raw(), updatedPidl);
+
+	if (FAILED(hr))
+	{
+		co_return;
+	}
+
+	co_await ResumeOnUiThread(runtime);
+
+	if (!weakSelf)
+	{
+		co_return;
+	}
+
+	// TODO: Should possibly also update the current navigation entry.
+
+	// The parsing path isn't updated, since it should remain the same. Item renames can result in
+	// this function being triggered, but only if the item is virtual. In that case, the parsing
+	// path isn't going to change.
+	weakSelf->m_directoryState.pidlDirectory = updatedPidl;
+	weakSelf->m_app->GetShellBrowserEvents()->NotifyDirectoryPropertiesChanged(weakSelf.Get());
+}
+
+concurrencpp::null_result ShellBrowserImpl::RefreshDirectoryAfterUpdate(
+	WeakPtr<ShellBrowserImpl> weakSelf, Runtime *runtime)
+{
+	co_await concurrencpp::resume_on(runtime->GetUiThreadExecutor());
+
+	if (!weakSelf)
+	{
+		co_return;
+	}
+
+	weakSelf->m_navigationController->Refresh();
+}
+
+// Navigates to the closest ancestor of this item that exists. If this item itself exists, no
+// navigation will occur.
+concurrencpp::null_result ShellBrowserImpl::NavigateUpToClosestExistingItemIfNecessary(
+	WeakPtr<ShellBrowserImpl> weakSelf, PidlAbsolute currentDirectory, Runtime *runtime)
+{
+	co_await ResumeOnComStaThread(runtime);
+
+	auto closestExistingItemPidl = GetClosestExistingItem(currentDirectory.Raw());
+
+	if (!closestExistingItemPidl.HasValue())
+	{
+		DCHECK(false);
+		co_return;
+	}
+
+	if (ArePidlsEquivalent(closestExistingItemPidl.Raw(), currentDirectory.Raw()))
+	{
+		// The current directory still exists, so there's no need to do anything.
+		co_return;
+	}
+
+	co_await ResumeOnUiThread(runtime);
+
+	if (!weakSelf)
+	{
+		co_return;
+	}
+
+	// The current directory no longer exists, so the navigation here needs to proceed in this tab,
+	// regardless of whether or not the tab is locked.
+	NavigateParams params = NavigateParams::Normal(closestExistingItemPidl.Raw());
+	params.overrideNavigationTargetMode = true;
+	weakSelf->m_navigationController->Navigate(params);
 }

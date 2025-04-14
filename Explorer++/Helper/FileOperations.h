@@ -4,11 +4,13 @@
 
 #pragma once
 
+#include "PidlHelper.h"
 #include <list>
 #include <vector>
 
-namespace NFileOperations
+namespace FileOperations
 {
+
 enum class OverwriteMethod
 {
 	OnePass = 1,
@@ -16,7 +18,8 @@ enum class OverwriteMethod
 };
 
 HRESULT RenameFile(IShellItem *item, const std::wstring &newName);
-HRESULT DeleteFiles(HWND hwnd, std::vector<PCIDLIST_ABSOLUTE> &pidls, bool permanent, bool silent);
+HRESULT DeleteFiles(HWND hwnd, const std::vector<PCIDLIST_ABSOLUTE> &pidls, bool permanent,
+	bool silent);
 void DeleteFileSecurely(const std::wstring &strFilename, OverwriteMethod overwriteMethod);
 HRESULT CopyFilesToFolder(HWND hOwner, const std::wstring &strTitle,
 	std::vector<PCIDLIST_ABSOLUTE> &pidls, bool move);
@@ -36,11 +39,10 @@ HRESULT ResolveLink(HWND hwnd, DWORD fFlags, const TCHAR *szLinkFilename, TCHAR 
 	int nBufferSize);
 
 BOOL CreateBrowseDialog(HWND hOwner, const std::wstring &strTitle, PIDLIST_ABSOLUTE *ppidl);
+
 };
 
-HRESULT CopyFiles(const std::vector<PCIDLIST_ABSOLUTE> &items, IDataObject **dataObjectOut);
-HRESULT CutFiles(const std::vector<PCIDLIST_ABSOLUTE> &items, IDataObject **dataObjectOut);
-HRESULT CopyFilesToClipboard(const std::vector<PCIDLIST_ABSOLUTE> &items, bool move,
+HRESULT CopyFiles(const std::vector<PidlAbsolute> &items, IDataObject **dataObjectOut);
+HRESULT CutFiles(const std::vector<PidlAbsolute> &items, IDataObject **dataObjectOut);
+HRESULT CopyFilesToClipboard(const std::vector<PidlAbsolute> &items, bool move,
 	IDataObject **dataObjectOut);
-
-int PasteHardLinks(const TCHAR *szDestination);

@@ -6,8 +6,8 @@
 
 #include "ThemedDialog.h"
 #include "../Helper/DialogSettings.h"
-#include "../Helper/FileContextMenuManager.h"
 #include "../Helper/ReferenceCount.h"
+#include "../Helper/ShellContextMenu.h"
 #include <boost/circular_buffer.hpp>
 #include <MsXml2.h>
 #include <objbase.h>
@@ -17,10 +17,11 @@
 #include <unordered_map>
 #include <vector>
 
+class BrowserWindow;
 class CoreInterface;
-class Navigator;
+class IconResourceLoader;
 class SearchDialog;
-class TabContainer;
+class TabContainerImpl;
 
 /* Manages settings for the search dialog. */
 class SearchDialogPersistentSettings : public DialogSettings
@@ -133,11 +134,13 @@ private:
 	int m_iFilesFound;
 };
 
-class SearchDialog : public ThemedDialog, private FileContextMenuHandler
+class SearchDialog : public ThemedDialog, private ShellContextMenuHandler
 {
 public:
-	SearchDialog(HINSTANCE resourceInstance, HWND hParent, std::wstring_view searchDirectory,
-		CoreInterface *coreInterface, Navigator *navigator, TabContainer *tabContainer);
+	SearchDialog(HINSTANCE resourceInstance, HWND hParent, ThemeManager *themeManager,
+		std::wstring_view searchDirectory, BrowserWindow *browserWindow,
+		CoreInterface *coreInterface, TabContainerImpl *tabContainerImpl,
+		const IconResourceLoader *iconResourceLoader);
 	~SearchDialog();
 
 	/* Sorting methods. */
@@ -162,10 +165,7 @@ private:
 	static const int SEARCH_PROCESSITEMS_TIMER_ELAPSED = 50;
 	static const int SEARCH_MAX_ITEMS_BATCH_PROCESS = 100;
 
-	static const int MIN_SHELL_MENU_ID = 1;
-	static const int MAX_SHELL_MENU_ID = 1000;
-
-	static const int MENU_ID_OPEN_FILE_LOCATION = (MAX_SHELL_MENU_ID + 1);
+	static const int OPEN_FILE_LOCATION_MENU_ITEM_ID = ShellContextMenu::MAX_SHELL_MENU_ID + 1;
 
 	std::vector<ResizableDialogControl> GetResizableControls() override;
 	void SaveState() override;
@@ -177,21 +177,25 @@ private:
 	void UpdateListViewHeader();
 
 	// FileContextMenuHandler
-	void UpdateMenuEntries(PCIDLIST_ABSOLUTE pidlParent,
-		const std::vector<PITEMID_CHILD> &pidlItems, DWORD_PTR dwData, IContextMenu *contextMenu,
-		HMENU hMenu) override;
-	BOOL HandleShellMenuItem(PCIDLIST_ABSOLUTE pidlParent,
-		const std::vector<PITEMID_CHILD> &pidlItems, DWORD_PTR dwData, const TCHAR *szCmd) override;
-	void HandleCustomMenuItem(PCIDLIST_ABSOLUTE pidlParent,
-		const std::vector<PITEMID_CHILD> &pidlItems, int iCmd) override;
+	void UpdateMenuEntries(HMENU menu, PCIDLIST_ABSOLUTE pidlParent,
+		const std::vector<PidlChild> &pidlItems, IContextMenu *contextMenu) override;
+	std::wstring GetHelpTextForItem(UINT menuItemId) override;
+	bool HandleShellMenuItem(PCIDLIST_ABSOLUTE pidlParent, const std::vector<PidlChild> &pidlItems,
+		const std::wstring &verb) override;
+	void HandleCustomMenuItem(PCIDLIST_ABSOLUTE pidlParent, const std::vector<PidlChild> &pidlItems,
+		UINT menuItemId) override;
 
 	std::wstring m_searchDirectory;
+	BrowserWindow *m_browserWindow = nullptr;
+	CoreInterface *m_coreInterface = nullptr;
+	TabContainerImpl *m_tabContainerImpl = nullptr;
+	const IconResourceLoader *const m_iconResourceLoader;
 	wil::unique_hicon m_directoryIcon;
 	BOOL m_bSearching;
 	BOOL m_bStopSearching;
 	TCHAR m_szSearchButton[32];
 
-	Search *m_pSearch;
+	Search *m_pSearch = nullptr;
 
 	/* Listview item information. */
 	std::list<PIDLIST_ABSOLUTE> m_AwaitingSearchItems;
@@ -201,9 +205,5 @@ private:
 
 	BOOL m_bSetSearchTimer;
 
-	CoreInterface *m_coreInterface;
-	Navigator *m_navigator;
-	TabContainer *m_tabContainer;
-
-	SearchDialogPersistentSettings *m_persistentSettings;
+	SearchDialogPersistentSettings *m_persistentSettings = nullptr;
 };

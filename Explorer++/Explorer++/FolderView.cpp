@@ -4,15 +4,11 @@
 
 #include "stdafx.h"
 #include "FolderView.h"
-#include "ShellBrowser/ShellBrowser.h"
+#include "ShellBrowser/ShellBrowserImpl.h"
 
-FolderView::FolderView(std::weak_ptr<ShellBrowser> shellBrowserWeak) :
+FolderView::FolderView(WeakPtr<ShellBrowserImpl> shellBrowserWeak) :
 	m_shellBrowserWeak(shellBrowserWeak)
 {
-	auto shellBrowser = m_shellBrowserWeak.lock();
-	assert(shellBrowser);
-
-	m_initialFolderId = shellBrowser->GetUniqueFolderId();
 }
 
 // IFolderView2
@@ -195,9 +191,9 @@ IFACEMETHODIMP FolderView::GetGroupSubsetCount(UINT *numVisibleRows)
 
 IFACEMETHODIMP FolderView::SetRedraw(BOOL redrawOn)
 {
-	if (auto shellBrowser = m_shellBrowserWeak.lock())
+	if (m_shellBrowserWeak)
 	{
-		SendMessage(shellBrowser->GetListView(), WM_SETREDRAW, redrawOn, 0);
+		SendMessage(m_shellBrowserWeak->GetListView(), WM_SETREDRAW, redrawOn, 0);
 	}
 
 	return S_OK;
@@ -232,14 +228,12 @@ IFACEMETHODIMP FolderView::SetCurrentViewMode(UINT viewMode)
 // background context menu for a directory) to be set up correctly.
 IFACEMETHODIMP FolderView::GetFolder(REFIID riid, void **ppv)
 {
-	auto shellBrowser = m_shellBrowserWeak.lock();
-
-	if (!shellBrowser)
+	if (!m_shellBrowserWeak)
 	{
 		return E_FAIL;
 	}
 
-	auto directory = shellBrowser->GetDirectoryIdl();
+	auto directory = m_shellBrowserWeak->GetDirectoryIdl();
 
 	if (riid == IID_IShellItemArray)
 	{
@@ -340,27 +334,25 @@ IFACEMETHODIMP FolderView::SelectAndPositionItems(UINT numItems, PCUITEMID_CHILD
 	UNREFERENCED_PARAMETER(pts);
 	UNREFERENCED_PARAMETER(flags);
 
-	auto shellBrowser = m_shellBrowserWeak.lock();
-
 	// If the hosting tab was closed or navigated to a different folder, the request to select items
 	// should be ignored.
-	if (!shellBrowser || shellBrowser->GetUniqueFolderId() != m_initialFolderId)
+	if (!m_shellBrowserWeak)
 	{
 		return E_FAIL;
 	}
 
 	if (WI_IsFlagSet(flags, SVSI_SELECT))
 	{
-		std::vector<unique_pidl_absolute> pidls;
+		std::vector<PidlAbsolute> pidls;
 
 		for (UINT i = 0; i < numItems; i++)
 		{
-			unique_pidl_absolute pidl(ILCombine(shellBrowser->GetDirectoryIdl().get(), items[i]));
-			pidls.push_back(std::move(pidl));
+			unique_pidl_absolute pidl(
+				ILCombine(m_shellBrowserWeak->GetDirectoryIdl().get(), items[i]));
+			pidls.emplace_back(pidl.get());
 		}
 
-		auto rawPidls = ShallowCopyPidls(pidls);
-		shellBrowser->SelectItems(rawPidls);
+		m_shellBrowserWeak->SelectItems(pidls);
 
 		return S_OK;
 	}

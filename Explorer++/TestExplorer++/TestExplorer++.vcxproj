@@ -1,6 +1,18 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug-Asan|ARM64">
+      <Configuration>Debug-Asan</Configuration>
+      <Platform>ARM64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug-Asan|Win32">
+      <Configuration>Debug-Asan</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug-Asan|x64">
+      <Configuration>Debug-Asan</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
     <ProjectConfiguration Include="Debug-LLVM|ARM64">
       <Configuration>Debug-LLVM</Configuration>
       <Platform>ARM64</Platform>
@@ -59,6 +71,11 @@
     <IntDir>$(Platform)\$(Configuration)\</IntDir>
     <TargetName>$(ProjectName)</TargetName>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug-Asan|Win32'">
+    <OutDir>$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>$(ProjectName)</TargetName>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug-LLVM|Win32'">
     <OutDir>$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\</IntDir>
@@ -74,7 +91,17 @@
     <IntDir>$(Platform)\$(Configuration)\</IntDir>
     <TargetName>$(ProjectName)</TargetName>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug-Asan|x64'">
+    <OutDir>$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>$(ProjectName)</TargetName>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
+    <OutDir>$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>$(ProjectName)</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug-Asan|ARM64'">
     <OutDir>$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\</IntDir>
     <TargetName>$(ProjectName)</TargetName>
@@ -100,16 +127,27 @@
     <TargetName>$(ProjectName)</TargetName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Debug-Asan|Win32'">
+    <EnableASAN>true</EnableASAN>
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Debug-Asan|x64'">
+    <EnableASAN>true</EnableASAN>
+  </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings" />
   <ImportGroup Label="Shared" />
   <ImportGroup Label="PropertySheets" />
+  <Import Project="$(SolutionDir)VersionNumber.props" />
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Label="Vcpkg">
     <VcpkgEnableManifest>true</VcpkgEnableManifest>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <VcpkgUseStatic>true</VcpkgUseStatic>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug-Asan|Win32'" Label="Vcpkg">
+    <VcpkgUseStatic>true</VcpkgUseStatic>
+    <VcpkgTriplet>x86-windows-asan</VcpkgTriplet>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Debug-LLVM|Win32'">
     <VcpkgUseStatic>true</VcpkgUseStatic>
@@ -120,7 +158,14 @@
   <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <VcpkgUseStatic>true</VcpkgUseStatic>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug-Asan|x64'" Label="Vcpkg">
+    <VcpkgUseStatic>true</VcpkgUseStatic>
+    <VcpkgTriplet>x64-windows-asan</VcpkgTriplet>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'" Label="Vcpkg">
+    <VcpkgUseStatic>true</VcpkgUseStatic>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug-Asan|ARM64'" Label="Vcpkg">
     <VcpkgUseStatic>true</VcpkgUseStatic>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Debug-LLVM|x64'">
@@ -136,54 +181,161 @@
     <VcpkgUseStatic>true</VcpkgUseStatic>
   </PropertyGroup>
   <ItemGroup>
+    <ClCompile Include="AcceleratorHelperTest.cpp" />
+    <ClCompile Include="AcceleratorManagerTest.cpp" />
+    <ClCompile Include="AcceleratorTestHelper.cpp" />
+    <ClCompile Include="ApplicationDropperTest.cpp" />
     <ClCompile Include="ApplicationTest.cpp" />
-    <ClCompile Include="ApplicationToolbarHelperTest.cpp" />
+    <ClCompile Include="ApplicationHelperTest.cpp" />
     <ClCompile Include="ApplicationToolbarRegistryStorageTest.cpp" />
-    <ClCompile Include="ApplicationToolbarStorageHelper.cpp" />
+    <ClCompile Include="ApplicationToolbarStorageTestHelper.cpp" />
     <ClCompile Include="ApplicationToolbarXmlStorageTest.cpp" />
     <ClCompile Include="BookmarkDropperTest.cpp" />
     <ClCompile Include="BookmarkRegistryStorageTest.cpp" />
-    <ClCompile Include="BookmarkStorageHelper.cpp" />
+    <ClCompile Include="BookmarkStorageTestHelper.cpp" />
     <ClCompile Include="BookmarkXmlStorageTest.cpp" />
+    <ClCompile Include="BrowserCommandControllerTest.cpp" />
+    <ClCompile Include="BrowserListTest.cpp" />
+    <ClCompile Include="BrowserWindowMock.cpp" />
     <ClCompile Include="ClipboardTest.cpp" />
     <ClCompile Include="ColorRuleRegistryStorageTest.cpp" />
-    <ClCompile Include="ColorRulesStorageHelper.cpp" />
+    <ClCompile Include="ColorRulesStorageTestHelper.cpp" />
     <ClCompile Include="ColorRuleTest.cpp" />
     <ClCompile Include="ColorRuleXmlStorageTest.cpp" />
+    <ClCompile Include="ColumnRegistryStorageTest.cpp" />
+    <ClCompile Include="ColumnStorageTestHelper.cpp" />
+    <ClCompile Include="ColumnStorageTest.cpp" />
+    <ClCompile Include="ColumnXmlStorageTest.cpp" />
+    <ClCompile Include="CommandLineSplitterTest.cpp" />
+    <ClCompile Include="CommandLineTest.cpp" />
+    <ClCompile Include="ComStaThreadPoolExecutorTest.cpp" />
+    <ClCompile Include="ConfigRegistryStorageTest.cpp" />
+    <ClCompile Include="ConfigStorageTestHelper.cpp" />
+    <ClCompile Include="ConfigXmlStorageTest.cpp" />
     <ClCompile Include="ControlsTest.cpp" />
     <ClCompile Include="CustomFontStorageTest.cpp" />
+    <ClCompile Include="DataExchangeHelperTest.cpp" />
     <ClCompile Include="DataObjectImplTest.cpp" />
+    <ClCompile Include="DefaultColumnRegistryStorageTest.cpp" />
+    <ClCompile Include="DefaultColumnXmlStorageTest.cpp" />
+    <ClCompile Include="DragDropTestHelper.cpp" />
+    <ClCompile Include="DragDropHelperTest.cpp" />
+    <ClCompile Include="DriveEnumeratorImplTest.cpp" />
     <ClCompile Include="DriveModelTest.cpp" />
     <ClCompile Include="AcceleratorParserTest.cpp" />
     <ClCompile Include="BookmarkClipboardTest.cpp" />
     <ClCompile Include="BookmarkItemTest.cpp" />
     <ClCompile Include="BookmarkTreeTest.cpp" />
     <ClCompile Include="CachedIconsTest.cpp" />
+    <ClCompile Include="ExecutorTestHelper.cpp" />
+    <ClCompile Include="ExecutorTestBase.cpp" />
+    <ClCompile Include="FakeSystemClock.cpp" />
+    <ClCompile Include="FeatureListTest.cpp" />
+    <ClCompile Include="FrequentLocationsMenuTest.cpp" />
+    <ClCompile Include="FrequentLocationsModelTest.cpp" />
+    <ClCompile Include="FrequentLocationsRegistryStorageTest.cpp" />
+    <ClCompile Include="FrequentLocationsStorageTestHelper.cpp" />
+    <ClCompile Include="FrequentLocationsTrackerTest.cpp" />
+    <ClCompile Include="FrequentLocationsXmlStorageTest.cpp" />
     <ClCompile Include="GdiplusHelperTest.cpp" />
+    <ClCompile Include="AsyncIconFetcherTest.cpp" />
+    <ClCompile Include="HistoryTrackerTest.cpp" />
+    <ClCompile Include="NavigationEventsTest.cpp" />
+    <ClCompile Include="ShellBrowserEventsTest.cpp" />
+    <ClCompile Include="TabEventsTest.cpp" />
+    <ClCompile Include="ImageTestHelper.cpp" />
+    <ClCompile Include="HistoryMenuTest.cpp" />
     <ClCompile Include="HelperTest.cpp" />
+    <ClCompile Include="HistoryModelTest.cpp" />
+    <ClCompile Include="BrowserTrackerTest.cpp" />
+    <ClCompile Include="LanguageHelperTest.cpp" />
+    <ClCompile Include="ListViewHelperTest.cpp" />
+    <ClCompile Include="MessageLoop.cpp" />
+    <ClCompile Include="ModelessDialogListTest.cpp" />
+    <ClCompile Include="NavigationManagerTest.cpp" />
+    <ClCompile Include="NavigationRequestTest.cpp" />
+    <ClCompile Include="PopupMenuViewTestHelper.cpp" />
+    <ClCompile Include="ProcessManagerTest.cpp" />
+    <ClCompile Include="RuntimeHelperTest.cpp" />
+    <ClCompile Include="RuntimeTest.cpp" />
+    <ClCompile Include="RuntimeTestHelper.cpp" />
+    <ClCompile Include="ScopedRedrawDisablerTest.cpp" />
+    <ClCompile Include="ScopedStopSourceTest.cpp" />
+    <ClCompile Include="ShellEnumeratorFake.cpp" />
+    <ClCompile Include="ShellEnumeratorImplTest.cpp" />
+    <ClCompile Include="StartupFoldersRegistryStorageTest.cpp" />
+    <ClCompile Include="StartupFoldersStorageTestHelper.cpp" />
+    <ClCompile Include="StartupFoldersXmlStorageTest.cpp" />
+    <ClCompile Include="TabRestorerMenuTest.cpp" />
+    <ClCompile Include="TabRestorerTest.cpp" />
+    <ClCompile Include="UIThreadExecutorTest.cpp" />
+    <ClCompile Include="MenuHelperTest.cpp" />
+    <ClCompile Include="PasteSymLinksServerClientTest.cpp" />
+    <ClCompile Include="PopupMenuViewTest.cpp" />
+    <ClCompile Include="ShellIconLoaderFake.cpp" />
+    <ClCompile Include="ShellTestHelper.cpp" />
+    <ClCompile Include="TabHistoryMenuTest.cpp" />
+    <ClCompile Include="ImageHelperTest.cpp" />
+    <ClCompile Include="Main.cpp" />
+    <ClCompile Include="MainRebarRegistryStorageTest.cpp" />
+    <ClCompile Include="MainRebarStorageTestHelper.cpp" />
+    <ClCompile Include="MainRebarXmlStorageTest.cpp" />
+    <ClCompile Include="MainToolbarStorageTest.cpp" />
+    <ClCompile Include="ResourceHelperTest.cpp" />
+    <ClCompile Include="ServiceProviderTest.cpp" />
     <ClCompile Include="ManifestTest.cpp" />
     <ClCompile Include="MovableModelTest.cpp" />
+    <ClCompile Include="OneShotTimerTest.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug-Asan|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug-LLVM|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug-Asan|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug-Asan|ARM64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug-LLVM|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug-LLVM|ARM64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">Create</PrecompiledHeader>
+      <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</MultiProcessorCompilation>
+      <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Debug-LLVM|Win32'">false</MultiProcessorCompilation>
+      <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Debug-Asan|Win32'">false</MultiProcessorCompilation>
+      <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</MultiProcessorCompilation>
+      <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">false</MultiProcessorCompilation>
+      <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Debug-LLVM|ARM64'">false</MultiProcessorCompilation>
+      <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Debug-Asan|ARM64'">false</MultiProcessorCompilation>
+      <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">false</MultiProcessorCompilation>
+      <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</MultiProcessorCompilation>
+      <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Debug-LLVM|x64'">false</MultiProcessorCompilation>
+      <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Debug-Asan|x64'">false</MultiProcessorCompilation>
+      <MultiProcessorCompilation Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</MultiProcessorCompilation>
     </ClCompile>
     <ClCompile Include="PidlHelperTest.cpp" />
     <ClCompile Include="RegistrySettingsTest.cpp" />
-    <ClCompile Include="RegistryStorageHelper.cpp" />
-    <ClCompile Include="ResourceHelper.cpp" />
+    <ClCompile Include="RegistryStorageTestHelper.cpp" />
+    <ClCompile Include="ResourceTestHelper.cpp" />
+    <ClCompile Include="ShellBrowserFake.cpp" />
     <ClCompile Include="ShellHelperTest.cpp" />
+    <ClCompile Include="ShellItemsMenuTest.cpp" />
     <ClCompile Include="ShellNavigationControllerTest.cpp" />
     <ClCompile Include="StringHelperTest.cpp" />
+    <ClCompile Include="TabRegistryStorageTest.cpp" />
+    <ClCompile Include="TabStorageTestHelper.cpp" />
     <ClCompile Include="TabTest.cpp" />
+    <ClCompile Include="TabXmlStorageTest.cpp" />
+    <ClCompile Include="VersionHelperTest.cpp" />
+    <ClCompile Include="VersionTest.cpp" />
     <ClCompile Include="ViewModeHelperTest.cpp" />
-    <ClCompile Include="XmlStorageHelper.cpp" />
+    <ClCompile Include="WeakPtrFactoryTest.cpp" />
+    <ClCompile Include="WindowHelperTest.cpp" />
+    <ClCompile Include="WindowRegistryStorageTest.cpp" />
+    <ClCompile Include="WindowStorageTestHelper.cpp" />
+    <ClCompile Include="WindowSubclassTest.cpp" />
+    <ClCompile Include="WindowXmlStorageTest.cpp" />
+    <ClCompile Include="XMLSettingsTest.cpp" />
+    <ClCompile Include="XmlStorageTestHelper.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Explorer++\Explorer++.vcxproj">
@@ -192,17 +344,52 @@
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="TestExplorer++.rc" />
+    <ResourceCompile Include="TestResources.rc" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="ApplicationToolbarStorageHelper.h" />
-    <ClInclude Include="BookmarkStorageHelper.h" />
+    <ClInclude Include="AcceleratorTestHelper.h" />
+    <ClInclude Include="ApplicationToolbarStorageTestHelper.h" />
+    <ClInclude Include="BookmarkStorageTestHelper.h" />
     <ClInclude Include="BookmarkTreeHelper.h" />
-    <ClInclude Include="ColorRulesStorageHelper.h" />
+    <ClInclude Include="BrowserWindowMock.h" />
+    <ClInclude Include="ColorRulesStorageTestHelper.h" />
+    <ClInclude Include="ColumnStorageTestHelper.h" />
+    <ClInclude Include="ConfigStorageTestHelper.h" />
+    <ClInclude Include="DragDropTestHelper.h" />
+    <ClInclude Include="ExecutorTestHelper.h" />
+    <ClInclude Include="ExecutorTestBase.h" />
+    <ClInclude Include="FakeSystemClock.h" />
+    <ClInclude Include="FrequentLocationsStorageTestHelper.h" />
+    <ClInclude Include="GeneratorTestHelper.h" />
+    <ClInclude Include="GTestHelper.h" />
+    <ClInclude Include="ImageTestHelper.h" />
+    <ClInclude Include="MainRebarStorageTestHelper.h" />
+    <ClInclude Include="MessageLoop.h" />
     <ClInclude Include="MovableModelHelper.h" />
+    <ClInclude Include="NavigationRequestDelegateMock.h" />
+    <ClInclude Include="NavigationRequestTestHelper.h" />
     <ClInclude Include="pch.h" />
-    <ClInclude Include="RegistryStorageHelper.h" />
-    <ClInclude Include="ResourceHelper.h" />
-    <ClInclude Include="XmlStorageHelper.h" />
+    <ClInclude Include="PopupMenuViewTestHelper.h" />
+    <ClInclude Include="RegistryStorageTestHelper.h" />
+    <ClInclude Include="RuntimeTestHelper.h" />
+    <ClInclude Include="ShellEnumeratorFake.h" />
+    <ClInclude Include="ShellIconLoaderFake.h" />
+    <ClInclude Include="ShellTestHelper.h" />
+    <ClInclude Include="StartupFoldersStorageTestHelper.h" />
+    <ClInclude Include="StorageTestHelper.h" />
+    <ClInclude Include="TestResources.h" />
+    <ClInclude Include="ResourceTestHelper.h" />
+    <ClInclude Include="ShellBrowserFake.h" />
+    <ClInclude Include="TabNavigationMock.h" />
+    <ClInclude Include="TabStorageTestHelper.h" />
+    <ClInclude Include="WindowStorageTestHelper.h" />
+    <ClInclude Include="XmlStorageTestHelper.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="EmbeddedResources\basic.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <Manifest Include="compatibility.manifest" />
   </ItemGroup>
   <ItemDefinitionGroup />
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -210,19 +397,53 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NOMINMAX;WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
-      <WarningLevel>Level3</WarningLevel>
+      <WarningLevel>Level4</WarningLevel>
       <AdditionalIncludeDirectories>$(ProjectDir)..\Explorer++\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ConformanceMode>true</ConformanceMode>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <TreatAngleIncludeAsExternal>true</TreatAngleIncludeAsExternal>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <ExternalTemplatesDiagnostics>true</ExternalTemplatesDiagnostics>
+      <AdditionalOptions>/w15038 /utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>gmock_main.lib;Helper.lib;Explorer++.exe.lib;winmm.lib;propsys.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Helper.lib;Explorer++.exe.lib;winmm.lib;propsys.lib;windowscodecs.lib;dbghelp.lib;msxml2.lib;mpr.lib;urlmon.lib;wininet.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(ProjectDir)..\$(Platform)\$(Configuration);$(ProjectDir)..\Explorer++\$(Platform)\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+    </Link>
+    <PostBuildEvent>
+      <Command>xcopy "$(ProjectDir)Resources" "$(TargetDir)Resources\" /s /y</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug-Asan|Win32'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>NOMINMAX;WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <MinimalRebuild>false</MinimalRebuild>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <WarningLevel>Level4</WarningLevel>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Explorer++\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <ConformanceMode>true</ConformanceMode>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <TreatAngleIncludeAsExternal>true</TreatAngleIncludeAsExternal>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <ExternalTemplatesDiagnostics>true</ExternalTemplatesDiagnostics>
+      <AdditionalOptions>/w15038 /utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <SubSystem>Console</SubSystem>
+      <AdditionalDependencies>Helper.lib;Explorer++.exe.lib;winmm.lib;propsys.lib;windowscodecs.lib;dbghelp.lib;msxml2.lib;mpr.lib;urlmon.lib;wininet.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(ProjectDir)..\$(Platform)\$(Configuration);$(ProjectDir)..\Explorer++\$(Platform)\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
@@ -234,19 +455,20 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NOMINMAX;WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>true</MinimalRebuild>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
-      <WarningLevel>Level3</WarningLevel>
+      <WarningLevel>Level4</WarningLevel>
       <AdditionalIncludeDirectories>$(ProjectDir)..\Explorer++\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ConformanceMode>true</ConformanceMode>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>gmock_main.lib;Helper.lib;Explorer++.exe.lib;winmm.lib;propsys.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Helper.lib;Explorer++.exe.lib;winmm.lib;propsys.lib;windowscodecs.lib;dbghelp.lib;msxml2.lib;mpr.lib;urlmon.lib;wininet.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(ProjectDir)..\$(Platform)\$(Configuration);$(ProjectDir)..\Explorer++\$(Platform)\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
@@ -258,20 +480,54 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>X64;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NOMINMAX;X64;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
-      <WarningLevel>Level3</WarningLevel>
+      <WarningLevel>Level4</WarningLevel>
       <AdditionalIncludeDirectories>$(ProjectDir)..\Explorer++\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ConformanceMode>true</ConformanceMode>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <TreatAngleIncludeAsExternal>true</TreatAngleIncludeAsExternal>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <ExternalTemplatesDiagnostics>true</ExternalTemplatesDiagnostics>
+      <AdditionalOptions>/w15038 /utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
       <AdditionalLibraryDirectories>$(ProjectDir)..\$(Platform)\$(Configuration);$(ProjectDir)..\Explorer++\$(Platform)\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>gmock_main.lib;Helper.lib;Explorer++.exe.lib;winmm.lib;propsys.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Helper.lib;Explorer++.exe.lib;winmm.lib;propsys.lib;windowscodecs.lib;dbghelp.lib;msxml2.lib;mpr.lib;urlmon.lib;wininet.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <PostBuildEvent>
+      <Command>xcopy "$(ProjectDir)Resources" "$(TargetDir)Resources\" /s /y</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug-Asan|x64'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>NOMINMAX;X64;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <MinimalRebuild>false</MinimalRebuild>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <WarningLevel>Level4</WarningLevel>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Explorer++\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <ConformanceMode>true</ConformanceMode>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <TreatAngleIncludeAsExternal>true</TreatAngleIncludeAsExternal>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <ExternalTemplatesDiagnostics>true</ExternalTemplatesDiagnostics>
+      <AdditionalOptions>/w15038 /utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <SubSystem>Console</SubSystem>
+      <AdditionalLibraryDirectories>$(ProjectDir)..\$(Platform)\$(Configuration);$(ProjectDir)..\Explorer++\$(Platform)\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>Helper.lib;Explorer++.exe.lib;winmm.lib;propsys.lib;windowscodecs.lib;dbghelp.lib;msxml2.lib;mpr.lib;urlmon.lib;wininet.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)Resources" "$(TargetDir)Resources\" /s /y</Command>
@@ -282,20 +538,54 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>ARM64;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NOMINMAX;ARM64;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
-      <WarningLevel>Level3</WarningLevel>
+      <WarningLevel>Level4</WarningLevel>
       <AdditionalIncludeDirectories>$(ProjectDir)..\Explorer++\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ConformanceMode>true</ConformanceMode>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <TreatAngleIncludeAsExternal>true</TreatAngleIncludeAsExternal>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <ExternalTemplatesDiagnostics>true</ExternalTemplatesDiagnostics>
+      <AdditionalOptions>/w15038 /utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
       <AdditionalLibraryDirectories>$(ProjectDir)..\$(Platform)\$(Configuration);$(ProjectDir)..\Explorer++\$(Platform)\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>gmock_main.lib;Helper.lib;Explorer++.exe.lib;winmm.lib;propsys.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Helper.lib;Explorer++.exe.lib;winmm.lib;propsys.lib;windowscodecs.lib;dbghelp.lib;msxml2.lib;mpr.lib;urlmon.lib;wininet.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <PostBuildEvent>
+      <Command>xcopy "$(ProjectDir)Resources" "$(TargetDir)Resources\" /s /y</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug-Asan|ARM64'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>NOMINMAX;ARM64;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <MinimalRebuild>false</MinimalRebuild>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <WarningLevel>Level4</WarningLevel>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Explorer++\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <ConformanceMode>true</ConformanceMode>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <TreatAngleIncludeAsExternal>true</TreatAngleIncludeAsExternal>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <ExternalTemplatesDiagnostics>true</ExternalTemplatesDiagnostics>
+      <AdditionalOptions>/w15038 /utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <SubSystem>Console</SubSystem>
+      <AdditionalLibraryDirectories>$(ProjectDir)..\$(Platform)\$(Configuration);$(ProjectDir)..\Explorer++\$(Platform)\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>Helper.lib;Explorer++.exe.lib;winmm.lib;propsys.lib;windowscodecs.lib;dbghelp.lib;msxml2.lib;mpr.lib;urlmon.lib;wininet.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)Resources" "$(TargetDir)Resources\" /s /y</Command>
@@ -306,20 +596,21 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>X64;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NOMINMAX;X64;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>true</MinimalRebuild>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
-      <WarningLevel>Level3</WarningLevel>
+      <WarningLevel>Level4</WarningLevel>
       <AdditionalIncludeDirectories>$(ProjectDir)..\Explorer++\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ConformanceMode>true</ConformanceMode>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
       <AdditionalLibraryDirectories>$(ProjectDir)..\$(Platform)\$(Configuration);$(ProjectDir)..\Explorer++\$(Platform)\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>gmock_main.lib;Helper.lib;Explorer++.exe.lib;winmm.lib;propsys.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Helper.lib;Explorer++.exe.lib;winmm.lib;propsys.lib;windowscodecs.lib;dbghelp.lib;msxml2.lib;mpr.lib;urlmon.lib;wininet.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)Resources" "$(TargetDir)Resources\" /s /y</Command>
@@ -330,20 +621,21 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>ARM64;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NOMINMAX;ARM64;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>true</MinimalRebuild>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
-      <WarningLevel>Level3</WarningLevel>
+      <WarningLevel>Level4</WarningLevel>
       <AdditionalIncludeDirectories>$(ProjectDir)..\Explorer++\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <ConformanceMode>true</ConformanceMode>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
       <AdditionalLibraryDirectories>$(ProjectDir)..\$(Platform)\$(Configuration);$(ProjectDir)..\Explorer++\$(Platform)\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>gmock_main.lib;Helper.lib;Explorer++.exe.lib;winmm.lib;propsys.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Helper.lib;Explorer++.exe.lib;winmm.lib;propsys.lib;windowscodecs.lib;dbghelp.lib;msxml2.lib;mpr.lib;urlmon.lib;wininet.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)Resources" "$(TargetDir)Resources\" /s /y</Command>
@@ -353,14 +645,19 @@
     <ClCompile>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NOMINMAX;WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <WarningLevel>Level3</WarningLevel>
+      <WarningLevel>Level4</WarningLevel>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <AdditionalIncludeDirectories>$(ProjectDir)..\Explorer++\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <TreatWarningAsError>true</TreatWarningAsError>
       <ConformanceMode>true</ConformanceMode>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <TreatAngleIncludeAsExternal>true</TreatAngleIncludeAsExternal>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <ExternalTemplatesDiagnostics>true</ExternalTemplatesDiagnostics>
+      <AdditionalOptions>/w15038 /utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -368,7 +665,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <AdditionalLibraryDirectories>$(ProjectDir)..\$(Platform)\$(Configuration);$(ProjectDir)..\Explorer++\$(Platform)\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>gmock_main.lib;Helper.lib;Explorer++.exe.lib;winmm.lib;propsys.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Helper.lib;Explorer++.exe.lib;winmm.lib;propsys.lib;windowscodecs.lib;dbghelp.lib;msxml2.lib;mpr.lib;urlmon.lib;wininet.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)Resources" "$(TargetDir)Resources\" /s /y</Command>
@@ -378,14 +675,19 @@
     <ClCompile>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <PreprocessorDefinitions>X64;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NOMINMAX;X64;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <WarningLevel>Level3</WarningLevel>
+      <WarningLevel>Level4</WarningLevel>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <AdditionalIncludeDirectories>$(ProjectDir)..\Explorer++\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <TreatWarningAsError>true</TreatWarningAsError>
       <ConformanceMode>true</ConformanceMode>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <TreatAngleIncludeAsExternal>true</TreatAngleIncludeAsExternal>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <ExternalTemplatesDiagnostics>true</ExternalTemplatesDiagnostics>
+      <AdditionalOptions>/w15038 /utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -393,7 +695,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <AdditionalLibraryDirectories>$(ProjectDir)..\$(Platform)\$(Configuration);$(ProjectDir)..\Explorer++\$(Platform)\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>gmock_main.lib;Helper.lib;Explorer++.exe.lib;winmm.lib;propsys.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Helper.lib;Explorer++.exe.lib;winmm.lib;propsys.lib;windowscodecs.lib;dbghelp.lib;msxml2.lib;mpr.lib;urlmon.lib;wininet.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)Resources" "$(TargetDir)Resources\" /s /y</Command>
@@ -403,14 +705,19 @@
     <ClCompile>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <PreprocessorDefinitions>ARM64;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NOMINMAX;ARM64;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <WarningLevel>Level3</WarningLevel>
+      <WarningLevel>Level4</WarningLevel>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <AdditionalIncludeDirectories>$(ProjectDir)..\Explorer++\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <TreatWarningAsError>true</TreatWarningAsError>
       <ConformanceMode>true</ConformanceMode>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <TreatAngleIncludeAsExternal>true</TreatAngleIncludeAsExternal>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <ExternalTemplatesDiagnostics>true</ExternalTemplatesDiagnostics>
+      <AdditionalOptions>/w15038 /utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -418,7 +725,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <AdditionalLibraryDirectories>$(ProjectDir)..\$(Platform)\$(Configuration);$(ProjectDir)..\Explorer++\$(Platform)\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>gmock_main.lib;Helper.lib;Explorer++.exe.lib;winmm.lib;propsys.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Helper.lib;Explorer++.exe.lib;winmm.lib;propsys.lib;windowscodecs.lib;dbghelp.lib;msxml2.lib;mpr.lib;urlmon.lib;wininet.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)Resources" "$(TargetDir)Resources\" /s /y</Command>

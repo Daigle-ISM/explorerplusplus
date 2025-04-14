@@ -4,47 +4,42 @@
 
 #pragma once
 
-#include "SignalWrapper.h"
-#include "../Helper/Macros.h"
-#include "../Helper/ShellHelper.h"
-#include <optional>
+#include "../Helper/PidlHelper.h"
+#include <boost/core/noncopyable.hpp>
 #include <vector>
 
-struct PreservedHistoryEntry;
-
-class HistoryEntry
+class HistoryEntry : private boost::noncopyable
 {
 public:
-	enum class PropertyType
+	enum class InitialNavigationType
 	{
-		SystemIconIndex
+		// An entry of this type represents a provisional, initial entry. Typically, history entries
+		// are only added once a navigation commits. However, since there always needs to be at
+		// least one history entry, an entry needs to be created for the very first navigation
+		// up-front, before any navigation has been committed.
+		//
+		// There can be only one initial entry and it will be replaced whenever a commit occurs.
+		Initial,
+
+		// Represents a standard, committed entry.
+		NonInitial
 	};
 
-	HistoryEntry(PCIDLIST_ABSOLUTE pidl, std::wstring_view displayName,
-		std::wstring_view fullPathForDisplay, std::optional<int> systemIconIndex = std::nullopt);
-	HistoryEntry(const PreservedHistoryEntry &preservedHistoryEntry);
+	HistoryEntry(const PidlAbsolute &pidl,
+		InitialNavigationType type = InitialNavigationType::NonInitial);
 
 	int GetId() const;
-	unique_pidl_absolute GetPidl() const;
-	std::wstring GetDisplayName() const;
-	std::wstring GetFullPathForDisplay() const;
-	std::optional<int> GetSystemIconIndex() const;
-	void SetSystemIconIndex(int iconIndex);
-	std::vector<unique_pidl_absolute> GetSelectedItems() const;
-	void SetSelectedItems(const std::vector<PCIDLIST_ABSOLUTE> &pidls);
-
-	SignalWrapper<HistoryEntry, void(const HistoryEntry &entry, PropertyType propertyType)>
-		historyEntryUpdatedSignal;
+	const PidlAbsolute &GetPidl() const;
+	bool IsInitialEntry() const;
+	InitialNavigationType GetInitialNavigationType() const;
+	const std::vector<PidlAbsolute> &GetSelectedItems() const;
+	void SetSelectedItems(const std::vector<PidlAbsolute> &pidls);
 
 private:
-	DISALLOW_COPY_AND_ASSIGN(HistoryEntry);
-
-	static int idCounter;
+	static inline int idCounter = 0;
 	const int m_id;
 
-	unique_pidl_absolute m_pidl;
-	std::wstring m_displayName;
-	std::wstring m_fullPathForDisplay;
-	std::optional<int> m_systemIconIndex;
-	std::vector<unique_pidl_absolute> m_selectedItems;
+	const PidlAbsolute m_pidl;
+	const InitialNavigationType m_type;
+	std::vector<PidlAbsolute> m_selectedItems;
 };

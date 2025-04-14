@@ -3,10 +3,11 @@
 // See LICENSE in the top level directory
 
 #include "stdafx.h"
+#include "Config.h"
 #include "DisplayWindow.h"
-#include "../Helper/Macros.h"
 #include "../Helper/ShellHelper.h"
 #include "../Helper/WindowHelper.h"
+#include <algorithm>
 
 /* Defines how close the text can get to the bottom
 of the display window before it is moved into the
@@ -35,60 +36,16 @@ at the top and bottom of the thumbnail. */
 
 std::list<ThumbnailEntry_t> g_ThumbnailEntries;
 
-void DisplayWindow::DrawGradientFill(HDC hdc, RECT *rc)
-{
-	if (m_hBitmapBackground)
-	{
-		DeleteObject(m_hBitmapBackground);
-	}
-
-	/* Create the (temporary) off-screen buffer used for drawing. */
-	m_hBitmapBackground = CreateCompatibleBitmap(hdc, rc->right - rc->left, rc->bottom - rc->top);
-	HGDIOBJ originalBackgroundObject = SelectObject(m_hdcBackground, m_hBitmapBackground);
-
-	Gdiplus::Graphics graphics(m_hdcBackground);
-
-	Gdiplus::Rect displayRect(0, 0, rc->right - rc->left, rc->bottom - rc->top);
-
-	Gdiplus::GraphicsPath path;
-	path.AddRectangle(displayRect);
-	Gdiplus::PathGradientBrush pgb(&path);
-	pgb.SetCenterPoint(Gdiplus::Point(0, 0));
-
-	pgb.SetCenterColor(m_CentreColor);
-
-	INT count = 1;
-	pgb.SetSurroundColors(&m_SurroundColor, &count);
-	graphics.FillRectangle(&pgb, displayRect);
-
-	/* This draws a separator line across the top edge of the window,
-	so that it is visually separated from other windows. */
-	Gdiplus::Pen newPen(BORDER_COLOUR, 1);
-
-	if (m_bVertical)
-	{
-		graphics.DrawLine(&newPen, 0, 0, 0, rc->bottom);
-	}
-	else
-	{
-		graphics.DrawLine(&newPen, 0, 0, rc->right, 0);
-	}
-
-	SelectObject(m_hdcBackground, originalBackgroundObject);
-}
-
-void DisplayWindow::PatchBackground(HDC hdc, RECT *rc, RECT *updateRect)
+void DisplayWindow::Draw(HDC hdc, RECT *rc, RECT *updateRect)
 {
 	HDC hdcMem = CreateCompatibleDC(hdc);
 	HBITMAP hBitmap = CreateCompatibleBitmap(hdc, rc->right - rc->left, rc->bottom - rc->top);
 	HGDIOBJ hOriginalObject = SelectObject(hdcMem, hBitmap);
 
-	/* Draw the stored background on top of the patched area. */
-	BitBlt(hdcMem, updateRect->left, updateRect->top, rc->right, rc->bottom, m_hdcBackground,
-		updateRect->left, updateRect->top, SRCCOPY);
+	DrawBackground(hdcMem, rc);
 
 	PaintText(hdcMem, m_LeftIndent);
-	DrawIconEx(hdcMem, MAIN_ICON_LEFT, MAIN_ICON_TOP, m_hMainIcon, MAIN_ICON_WIDTH,
+	DrawIconEx(hdcMem, MAIN_ICON_LEFT, MAIN_ICON_TOP, m_mainIcon.get(), MAIN_ICON_WIDTH,
 		MAIN_ICON_HEIGHT, 0, nullptr, DI_NORMAL);
 
 	if (m_bShowThumbnail)
@@ -104,6 +61,41 @@ void DisplayWindow::PatchBackground(HDC hdc, RECT *rc, RECT *updateRect)
 	DeleteDC(hdcMem);
 }
 
+void DisplayWindow::DrawBackground(HDC hdcMem, RECT *rc)
+{
+	Gdiplus::Graphics graphics(hdcMem);
+
+	Gdiplus::Rect displayRect(0, 0, rc->right - rc->left, rc->bottom - rc->top);
+
+	Gdiplus::GraphicsPath path;
+	path.AddRectangle(displayRect);
+	Gdiplus::PathGradientBrush pgb(&path);
+	pgb.SetCenterPoint(Gdiplus::Point(0, 0));
+
+	Gdiplus::Color centreColor;
+	centreColor.SetFromCOLORREF(m_config->displayWindowCentreColor.get());
+	pgb.SetCenterColor(centreColor);
+
+	Gdiplus::Color surroundColor;
+	surroundColor.SetFromCOLORREF(m_config->displayWindowSurroundColor.get());
+	INT count = 1;
+	pgb.SetSurroundColors(&surroundColor, &count);
+	graphics.FillRectangle(&pgb, displayRect);
+
+	/* This draws a separator line across the top edge of the window,
+	so that it is visually separated from other windows. */
+	Gdiplus::Pen newPen(BORDER_COLOUR, 1);
+
+	if (m_bVertical)
+	{
+		graphics.DrawLine(&newPen, 0, 0, 0, rc->bottom);
+	}
+	else
+	{
+		graphics.DrawLine(&newPen, 0, 0, rc->right, 0);
+	}
+}
+
 void DisplayWindow::DrawThumbnail(HDC hdcMem)
 {
 	if (!m_bThumbnailExtracted)
@@ -115,7 +107,7 @@ void DisplayWindow::DrawThumbnail(HDC hdcMem)
 		if (!m_bThumbnailExtractionFailed)
 		{
 			RECT rc;
-			GetClientRect(m_hDisplayWindow, &rc);
+			GetClientRect(m_hwnd, &rc);
 
 			HDC hdcSrc = CreateCompatibleDC(hdcMem);
 			auto hBitmapOld = (HBITMAP) SelectObject(hdcSrc, m_hbmThumbnail);
@@ -190,7 +182,7 @@ void DisplayWindow::ExtractThumbnailImageInternal(ThumbnailEntry_t *pte)
 
 		pridl = ILCloneChild(ILFindLastID(pidlFull));
 
-		hr = BindToIdl(pidlParent, IID_PPV_ARGS(&pShellFolder));
+		hr = SHBindToObject(nullptr, pidlParent, nullptr, IID_PPV_ARGS(&pShellFolder));
 
 		if (SUCCEEDED(hr))
 		{
@@ -198,7 +190,7 @@ void DisplayWindow::ExtractThumbnailImageInternal(ThumbnailEntry_t *pte)
 
 			if (SUCCEEDED(hr))
 			{
-				GetClientRect(m_hDisplayWindow, &rc);
+				GetClientRect(m_hwnd, &rc);
 
 				/* First, query the thumbnail so that its actual aspect
 				ratio can be calculated. */
@@ -206,8 +198,8 @@ void DisplayWindow::ExtractThumbnailImageInternal(ThumbnailEntry_t *pte)
 				size.cx = GetRectHeight(&rc) - THUMB_HEIGHT_DELTA;
 				size.cy = GetRectHeight(&rc) - THUMB_HEIGHT_DELTA;
 
-				hr = pExtractImage->GetLocation(szImage, SIZEOF_ARRAY(szImage), &dwPriority, &size,
-					32, &dwFlags);
+				hr = pExtractImage->GetLocation(szImage, std::size(szImage), &dwPriority, &size, 32,
+					&dwFlags);
 
 				if (SUCCEEDED(hr))
 				{
@@ -231,8 +223,8 @@ void DisplayWindow::ExtractThumbnailImageInternal(ThumbnailEntry_t *pte)
 							* ((double) bm.bmWidth / (double) bm.bmHeight));
 						m_iImageWidth = size.cx;
 						m_iImageHeight = size.cy;
-						pExtractImage->GetLocation(szImage, SIZEOF_ARRAY(szImage), &dwPriority,
-							&size, 32, &dwFlags);
+						pExtractImage->GetLocation(szImage, std::size(szImage), &dwPriority, &size,
+							32, &dwFlags);
 						hr = pExtractImage->Extract(&m_hbmThumbnail);
 
 						if (SUCCEEDED(hr))
@@ -245,7 +237,7 @@ void DisplayWindow::ExtractThumbnailImageInternal(ThumbnailEntry_t *pte)
 							if (!pte->bCancelled)
 							{
 								m_bThumbnailExtractionFailed = FALSE;
-								InvalidateRect(m_hDisplayWindow, nullptr, FALSE);
+								InvalidateRect(m_hwnd, nullptr, FALSE);
 							}
 
 							LeaveCriticalSection(&m_csDWThumbnails);
@@ -281,12 +273,12 @@ void DisplayWindow::PaintText(HDC hdc, unsigned int x)
 	unsigned int i = 0;
 
 	/* Needed to get character widths properly. */
-	HGDIOBJ hOriginalObject = SelectObject(hdc, m_hDisplayFont);
+	HGDIOBJ hOriginalObject = SelectObject(hdc, m_font.get());
 
 	SetBkMode(hdc, TRANSPARENT);
-	SetTextColor(hdc, m_TextColor);
+	SetTextColor(hdc, m_config->displayWindowTextColor.get());
 
-	GetClientRect(m_hDisplayWindow, &rcClient);
+	GetClientRect(m_hwnd, &rcClient);
 	xCurrent = x;
 
 	/* TODO: Fix. */
@@ -306,7 +298,7 @@ void DisplayWindow::PaintText(HDC hdc, unsigned int x)
 			iLine = 0;
 		}
 
-		iCurrentColumnWidth = max(iCurrentColumnWidth, stringSize.cx);
+		iCurrentColumnWidth = std::max(iCurrentColumnWidth, static_cast<int>(stringSize.cx));
 
 		rcText.left = xCurrent;
 		rcText.top = (iLine * stringSize.cy) + m_LineSpacing;
@@ -339,9 +331,9 @@ LONG DisplayWindow::OnMouseMove(LPARAM lParam)
 	cursorPos.x = GET_X_LPARAM(lParam);
 	cursorPos.y = GET_Y_LPARAM(lParam);
 
-	GetClientRect(m_hDisplayWindow, &rc);
+	GetClientRect(m_hwnd, &rc);
 
-	GetClientRect(GetParent(m_hDisplayWindow), &rc2);
+	GetClientRect(GetParent(m_hwnd), &rc2);
 
 	if (m_bSizing)
 	{
@@ -355,8 +347,9 @@ LONG DisplayWindow::OnMouseMove(LPARAM lParam)
 
 		/* Notify the main window, so that it can redraw/reposition
 		its other windows. */
-		SendMessage(GetParent(m_hDisplayWindow), WM_USER_DISPLAYWINDOWRESIZED,
-			MAKEWPARAM(max(rc.right - cursorPos.x, 0), max(rc.bottom - cursorPos.y, 0)), 0);
+		SendMessage(GetParent(m_hwnd), WM_USER_DISPLAYWINDOWRESIZED,
+			MAKEWPARAM(std::max(rc.right - cursorPos.x, 0L), std::max(rc.bottom - cursorPos.y, 0L)),
+			0);
 	}
 
 	if (m_bVertical && cursorPos.x <= (rc.left + 5) || !m_bVertical && cursorPos.y <= (rc.top + 5))
@@ -392,14 +385,14 @@ void DisplayWindow::OnLButtonDown(LPARAM lParam)
 	cursorPos.x = GET_X_LPARAM(lParam);
 	cursorPos.y = GET_Y_LPARAM(lParam);
 
-	GetClientRect(m_hDisplayWindow, &rc);
+	GetClientRect(m_hwnd, &rc);
 
 	if (m_bVertical && cursorPos.x <= (rc.left + 5) || !m_bVertical && cursorPos.y <= (rc.top + 5))
 	{
 		SetCursor(LoadCursor(NULL, m_bVertical ? IDC_SIZEWE : IDC_SIZENS));
 		m_bSizing = TRUE;
-		SetFocus(m_hDisplayWindow);
-		SetCapture(m_hDisplayWindow);
+		SetFocus(m_hwnd);
+		SetCapture(m_hwnd);
 	}
 
 	/* If an image thumbnail was clicked, open
@@ -416,7 +409,7 @@ void DisplayWindow::OnLButtonDown(LPARAM lParam)
 		{
 			/* TODO: Parent should be notified. */
 			SetCursor(LoadCursor(nullptr, IDC_HAND));
-			ShellExecute(m_hDisplayWindow, _T("open"), m_ImageFile, nullptr, nullptr, SW_SHOW);
+			ShellExecute(m_hwnd, _T("open"), m_ImageFile, nullptr, nullptr, SW_SHOWNORMAL);
 		}
 	}
 }
@@ -436,11 +429,11 @@ void DisplayWindow::OnRButtonUp(WPARAM wParam, LPARAM lParam)
 
 	if (PtInRect(&rc, pt))
 	{
-		SendMessage(GetParent(m_hDisplayWindow), WM_NDW_ICONRCLICK, wParam, lParam);
+		SendMessage(GetParent(m_hwnd), WM_NDW_ICONRCLICK, wParam, lParam);
 	}
 	else
 	{
-		SendMessage(GetParent(m_hDisplayWindow), WM_NDW_RCLICK, wParam, lParam);
+		SendMessage(GetParent(m_hwnd), WM_NDW_RCLICK, wParam, lParam);
 	}
 }
 
@@ -475,35 +468,6 @@ void DisplayWindow::OnSetThumbnailFile(WPARAM wParam, LPARAM lParam)
 		m_iImageHeight = 0;
 		m_bThumbnailExtracted = FALSE;
 		m_bThumbnailExtractionFailed = FALSE;
-		StringCchCopy(m_ImageFile, SIZEOF_ARRAY(m_ImageFile), (TCHAR *) wParam);
+		StringCchCopy(m_ImageFile, std::size(m_ImageFile), (TCHAR *) wParam);
 	}
-}
-
-void DisplayWindow::OnSize(int width, int height)
-{
-	HDC hdc;
-	RECT rc;
-
-	hdc = GetDC(m_hDisplayWindow);
-
-	SetRect(&rc, 0, 0, width, height);
-	DrawGradientFill(hdc, &rc);
-
-	ReleaseDC(m_hDisplayWindow, hdc);
-
-	RedrawWindow(m_hDisplayWindow, nullptr, nullptr, RDW_INVALIDATE);
-}
-
-void DisplayWindow::OnSetFont(HFONT hFont)
-{
-	m_hDisplayFont = hFont;
-
-	RedrawWindow(m_hDisplayWindow, nullptr, nullptr, RDW_INVALIDATE);
-}
-
-void DisplayWindow::OnSetTextColor(COLORREF hColor)
-{
-	m_TextColor = hColor;
-
-	RedrawWindow(m_hDisplayWindow, nullptr, nullptr, RDW_INVALIDATE);
 }

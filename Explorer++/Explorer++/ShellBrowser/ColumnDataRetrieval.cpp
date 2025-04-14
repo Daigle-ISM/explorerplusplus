@@ -11,7 +11,6 @@
 #include "../Helper/FileOperations.h"
 #include "../Helper/FolderSize.h"
 #include "../Helper/Helper.h"
-#include "../Helper/Macros.h"
 #include "../Helper/StringHelper.h"
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <wil/com.h>
@@ -179,7 +178,7 @@ std::wstring GetColumnText(ColumnType columnType, const BasicItemInfo_t &basicIt
 		break;
 	}
 
-	return EMPTY_STRING;
+	return L"";
 }
 
 std::wstring GetNameColumnText(const BasicItemInfo_t &itemInfo,
@@ -219,7 +218,7 @@ std::wstring ProcessItemFileName(const BasicItemInfo_t &itemInfo,
 	{
 		TCHAR szDisplayName[MAX_PATH];
 
-		StringCchCopy(szDisplayName, SIZEOF_ARRAY(szDisplayName), itemInfo.szDisplayName);
+		StringCchCopy(szDisplayName, std::size(szDisplayName), itemInfo.szDisplayName);
 
 		/* Strip the extension. */
 		PathRemoveExtension(szDisplayName);
@@ -240,7 +239,7 @@ std::wstring GetTypeColumnText(const BasicItemInfo_t &itemInfo)
 
 	if (res == 0)
 	{
-		return EMPTY_STRING;
+		return L"";
 	}
 
 	return shfi.szTypeName;
@@ -257,7 +256,7 @@ std::wstring GetSizeColumnText(const BasicItemInfo_t &itemInfo,
 	if ((itemInfo.wfd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == FILE_ATTRIBUTE_DIRECTORY)
 	{
 		TCHAR drive[MAX_PATH];
-		StringCchCopy(drive, SIZEOF_ARRAY(drive), itemInfo.getFullPath().c_str());
+		StringCchCopy(drive, std::size(drive), itemInfo.getFullPath().c_str());
 		PathStripToRoot(drive);
 
 		bool bNetworkRemovable = false;
@@ -274,14 +273,13 @@ std::wstring GetSizeColumnText(const BasicItemInfo_t &itemInfo,
 		}
 		else
 		{
-			return EMPTY_STRING;
+			return L"";
 		}
 	}
 
 	ULARGE_INTEGER fileSize = { itemInfo.wfd.nFileSizeLow, itemInfo.wfd.nFileSizeHigh };
-	SizeDisplayFormat displayFormat = globalFolderSettings.forceSize
-		? globalFolderSettings.sizeDisplayFormat
-		: SizeDisplayFormat::None;
+	auto displayFormat = globalFolderSettings.forceSize ? globalFolderSettings.sizeDisplayFormat
+														: +SizeDisplayFormat::None;
 	return FormatSizeString(fileSize.QuadPart, displayFormat);
 }
 
@@ -296,9 +294,8 @@ std::wstring GetFolderSizeColumnText(const BasicItemInfo_t &itemInfo,
 	the internal index. */
 	// m_cachedFolderSizes.insert({internalIndex, totalFolderSize.QuadPart});
 
-	SizeDisplayFormat displayFormat = globalFolderSettings.forceSize
-		? globalFolderSettings.sizeDisplayFormat
-		: SizeDisplayFormat::None;
+	auto displayFormat = globalFolderSettings.forceSize ? globalFolderSettings.sizeDisplayFormat
+														: +SizeDisplayFormat::None;
 	return FormatSizeString(folderInfo.size, displayFormat);
 }
 
@@ -316,18 +313,18 @@ std::wstring GetTimeColumnText(const BasicItemInfo_t &itemInfo, TimeType timeTyp
 	switch (timeType)
 	{
 	case TimeType::Modified:
-		bRet = CreateFileTimeString(&itemInfo.wfd.ftLastWriteTime, fileTime, SIZEOF_ARRAY(fileTime),
+		bRet = CreateFileTimeString(&itemInfo.wfd.ftLastWriteTime, fileTime, std::size(fileTime),
 			globalFolderSettings.showFriendlyDates);
 		break;
 
 	case TimeType::Created:
-		bRet = CreateFileTimeString(&itemInfo.wfd.ftCreationTime, fileTime, SIZEOF_ARRAY(fileTime),
+		bRet = CreateFileTimeString(&itemInfo.wfd.ftCreationTime, fileTime, std::size(fileTime),
 			globalFolderSettings.showFriendlyDates);
 		break;
 
 	case TimeType::Accessed:
-		bRet = CreateFileTimeString(&itemInfo.wfd.ftLastAccessTime, fileTime,
-			SIZEOF_ARRAY(fileTime), globalFolderSettings.showFriendlyDates);
+		bRet = CreateFileTimeString(&itemInfo.wfd.ftLastAccessTime, fileTime, std::size(fileTime),
+			globalFolderSettings.showFriendlyDates);
 		break;
 
 	default:
@@ -337,7 +334,7 @@ std::wstring GetTimeColumnText(const BasicItemInfo_t &itemInfo, TimeType timeTyp
 
 	if (!bRet)
 	{
-		return EMPTY_STRING;
+		return L"";
 	}
 
 	return fileTime;
@@ -351,12 +348,11 @@ std::wstring GetRealSizeColumnText(const BasicItemInfo_t &itemInfo,
 
 	if (!res)
 	{
-		return EMPTY_STRING;
+		return L"";
 	}
 
-	SizeDisplayFormat displayFormat = globalFolderSettings.forceSize
-		? globalFolderSettings.sizeDisplayFormat
-		: SizeDisplayFormat::None;
+	auto displayFormat = globalFolderSettings.forceSize ? globalFolderSettings.sizeDisplayFormat
+														: +SizeDisplayFormat::None;
 	return FormatSizeString(realFileSize.QuadPart, displayFormat);
 }
 
@@ -368,7 +364,7 @@ bool GetRealSizeColumnRawData(const BasicItemInfo_t &itemInfo, ULARGE_INTEGER &R
 	}
 
 	TCHAR root[MAX_PATH];
-	StringCchCopy(root, SIZEOF_ARRAY(root), itemInfo.getFullPath().c_str());
+	StringCchCopy(root, std::size(root), itemInfo.getFullPath().c_str());
 	PathStripToRoot(root);
 
 	DWORD dwClusterSize;
@@ -428,11 +424,11 @@ std::wstring GetShortNameColumnText(const BasicItemInfo_t &itemInfo)
 std::wstring GetOwnerColumnText(const BasicItemInfo_t &itemInfo)
 {
 	TCHAR owner[512];
-	BOOL ret = GetFileOwner(itemInfo.getFullPath().c_str(), owner, SIZEOF_ARRAY(owner));
+	BOOL ret = GetFileOwner(itemInfo.getFullPath().c_str(), owner, std::size(owner));
 
 	if (!ret)
 	{
-		return EMPTY_STRING;
+		return L"";
 	}
 
 	return owner;
@@ -443,14 +439,14 @@ std::wstring GetItemDetailsColumnText(const BasicItemInfo_t &itemInfo, const SHC
 {
 	TCHAR szDetail[512];
 	HRESULT hr =
-		GetItemDetails(itemInfo, pscid, szDetail, SIZEOF_ARRAY(szDetail), globalFolderSettings);
+		GetItemDetails(itemInfo, pscid, szDetail, std::size(szDetail), globalFolderSettings);
 
 	if (SUCCEEDED(hr))
 	{
 		return szDetail;
 	}
 
-	return EMPTY_STRING;
+	return L"";
 }
 
 HRESULT GetItemDetails(const BasicItemInfo_t &itemInfo, const SHCOLUMNID *pscid, TCHAR *szDetail,
@@ -514,11 +510,11 @@ std::wstring GetVersionColumnText(const BasicItemInfo_t &itemInfo, VersionInfoTy
 
 	TCHAR versionInfo[512];
 	BOOL versionInfoObtained = GetVersionInfoString(itemInfo.getFullPath().c_str(),
-		versionInfoName.c_str(), versionInfo, SIZEOF_ARRAY(versionInfo));
+		versionInfoName.c_str(), versionInfo, std::size(versionInfo));
 
 	if (!versionInfoObtained)
 	{
-		return EMPTY_STRING;
+		return L"";
 	}
 
 	return versionInfo;
@@ -527,12 +523,12 @@ std::wstring GetVersionColumnText(const BasicItemInfo_t &itemInfo, VersionInfoTy
 std::wstring GetShortcutToColumnText(const BasicItemInfo_t &itemInfo)
 {
 	TCHAR resolvedLinkPath[MAX_PATH];
-	HRESULT hr = NFileOperations::ResolveLink(nullptr, SLR_NO_UI, itemInfo.getFullPath().c_str(),
-		resolvedLinkPath, SIZEOF_ARRAY(resolvedLinkPath));
+	HRESULT hr = FileOperations::ResolveLink(nullptr, SLR_NO_UI, itemInfo.getFullPath().c_str(),
+		resolvedLinkPath, std::size(resolvedLinkPath));
 
 	if (FAILED(hr))
 	{
-		return EMPTY_STRING;
+		return L"";
 	}
 
 	return resolvedLinkPath;
@@ -544,11 +540,11 @@ std::wstring GetHardLinksColumnText(const BasicItemInfo_t &itemInfo)
 
 	if (numHardLinks == -1)
 	{
-		return EMPTY_STRING;
+		return L"";
 	}
 
 	TCHAR numHardLinksString[32];
-	StringCchPrintf(numHardLinksString, SIZEOF_ARRAY(numHardLinksString), _T("%ld"), numHardLinks);
+	StringCchPrintf(numHardLinksString, std::size(numHardLinksString), _T("%ld"), numHardLinks);
 
 	return numHardLinksString;
 }
@@ -562,14 +558,14 @@ std::wstring GetExtensionColumnText(const BasicItemInfo_t &itemInfo)
 {
 	if ((itemInfo.wfd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == FILE_ATTRIBUTE_DIRECTORY)
 	{
-		return EMPTY_STRING;
+		return L"";
 	}
 
 	TCHAR *extension = PathFindExtension(itemInfo.wfd.cFileName);
 
 	if (*extension != '.')
 	{
-		return EMPTY_STRING;
+		return L"";
 	}
 
 	return extension + 1;
@@ -579,11 +575,11 @@ std::wstring GetImageColumnText(const BasicItemInfo_t &itemInfo, PROPID Property
 {
 	TCHAR imageProperty[512];
 	BOOL res = ReadImageProperty(itemInfo.getFullPath().c_str(), PropertyID, imageProperty,
-		SIZEOF_ARRAY(imageProperty));
+		std::size(imageProperty));
 
 	if (!res)
 	{
-		return EMPTY_STRING;
+		return L"";
 	}
 
 	return imageProperty;
@@ -598,16 +594,16 @@ std::wstring GetFileSystemColumnText(const BasicItemInfo_t &itemInfo)
 
 	if (!isRoot)
 	{
-		return EMPTY_STRING;
+		return L"";
 	}
 
 	TCHAR fileSystemName[MAX_PATH];
 	BOOL res = GetVolumeInformation(fullFileName.c_str(), nullptr, 0, nullptr, nullptr, nullptr,
-		fileSystemName, SIZEOF_ARRAY(fileSystemName));
+		fileSystemName, std::size(fileSystemName));
 
 	if (!res)
 	{
-		return EMPTY_STRING;
+		return L"";
 	}
 
 	return fileSystemName;
@@ -629,11 +625,11 @@ std::wstring GetControlPanelCommentsColumnText(const BasicItemInfo_t &itemInfo)
 std::wstring GetPrinterColumnText(const BasicItemInfo_t &itemInfo,
 	PrinterInformationType printerInformationType)
 {
-	TCHAR printerInformation[256] = EMPTY_STRING;
+	TCHAR printerInformation[256] = L"";
 	TCHAR szStatus[256];
 
 	TCHAR itemDisplayName[MAX_PATH];
-	StringCchCopy(itemDisplayName, SIZEOF_ARRAY(itemDisplayName), itemInfo.szDisplayName);
+	StringCchCopy(itemDisplayName, std::size(itemDisplayName), itemInfo.szDisplayName);
 
 	HANDLE hPrinter;
 	BOOL res = OpenPrinter(itemDisplayName, &hPrinter, nullptr);
@@ -652,33 +648,33 @@ std::wstring GetPrinterColumnText(const BasicItemInfo_t &itemInfo,
 			switch (printerInformationType)
 			{
 			case PrinterInformationType::NumJobs:
-				StringCchPrintf(printerInformation, SIZEOF_ARRAY(printerInformation), _T("%d"),
+				StringCchPrintf(printerInformation, std::size(printerInformation), _T("%d"),
 					printerInfo2->cJobs);
 				break;
 
 			case PrinterInformationType::Status:
 				res = GetPrinterStatusDescription(printerInfo2->Status, szStatus,
-					SIZEOF_ARRAY(szStatus));
+					std::size(szStatus));
 
 				if (res)
 				{
-					StringCchCopyEx(printerInformation, SIZEOF_ARRAY(printerInformation), szStatus,
+					StringCchCopyEx(printerInformation, std::size(printerInformation), szStatus,
 						nullptr, nullptr, STRSAFE_IGNORE_NULLS);
 				}
 				break;
 
 			case PrinterInformationType::Comments:
-				StringCchCopyEx(printerInformation, SIZEOF_ARRAY(printerInformation),
+				StringCchCopyEx(printerInformation, std::size(printerInformation),
 					printerInfo2->pComment, nullptr, nullptr, STRSAFE_IGNORE_NULLS);
 				break;
 
 			case PrinterInformationType::Location:
-				StringCchCopyEx(printerInformation, SIZEOF_ARRAY(printerInformation),
+				StringCchCopyEx(printerInformation, std::size(printerInformation),
 					printerInfo2->pLocation, nullptr, nullptr, STRSAFE_IGNORE_NULLS);
 				break;
 
 			case PrinterInformationType::Model:
-				StringCchCopyEx(printerInformation, SIZEOF_ARRAY(printerInformation),
+				StringCchCopyEx(printerInformation, std::size(printerInformation),
 					printerInfo2->pDriverName, nullptr, nullptr, STRSAFE_IGNORE_NULLS);
 				break;
 
@@ -745,23 +741,41 @@ BOOL GetPrinterStatusDescription(DWORD dwStatus, TCHAR *szStatus, size_t cchMax)
 
 std::wstring GetNetworkAdapterColumnText(const BasicItemInfo_t &itemInfo)
 {
-	ULONG outBufLen = 0;
-	GetAdaptersAddresses(AF_UNSPEC, 0, nullptr, nullptr, &outBufLen);
-	auto *adapterAddresses = reinterpret_cast<IP_ADAPTER_ADDRESSES *>(new char[outBufLen]);
-	GetAdaptersAddresses(AF_UNSPEC, 0, nullptr, adapterAddresses, &outBufLen);
+	ULONG bufferSize = 0;
+	auto error = GetAdaptersAddresses(AF_UNSPEC, 0, nullptr, nullptr, &bufferSize);
 
-	IP_ADAPTER_ADDRESSES *adapaterAddress = adapterAddresses;
-
-	while (adapaterAddress != nullptr
-		&& lstrcmp(adapaterAddress->FriendlyName, itemInfo.wfd.cFileName) != 0)
+	if (error != ERROR_BUFFER_OVERFLOW)
 	{
-		adapaterAddress = adapaterAddress->Next;
+		return {};
+	}
+
+	std::vector<std::byte> buffer;
+	buffer.resize(bufferSize);
+	auto *adapters = reinterpret_cast<IP_ADAPTER_ADDRESSES *>(buffer.data());
+	error = GetAdaptersAddresses(AF_UNSPEC, 0, nullptr, adapters, &bufferSize);
+
+	if (error != ERROR_SUCCESS)
+	{
+		return {};
+	}
+
+	const auto *currentAdapter = adapters;
+
+	while (currentAdapter != nullptr
+		&& lstrcmp(currentAdapter->FriendlyName, itemInfo.wfd.cFileName) != 0)
+	{
+		currentAdapter = currentAdapter->Next;
+	}
+
+	if (!currentAdapter)
+	{
+		return {};
 	}
 
 	std::wstring status;
 
 	/* TODO: These strings need to be setup correctly. */
-	switch (adapaterAddress->OperStatus)
+	switch (currentAdapter->OperStatus)
 	{
 	case IfOperStatusUp:
 		status = L"Connected";
@@ -792,8 +806,6 @@ std::wstring GetNetworkAdapterColumnText(const BasicItemInfo_t &itemInfo)
 		break;
 	}
 
-	delete[] adapterAddresses;
-
 	return status;
 }
 
@@ -807,7 +819,7 @@ std::wstring GetMediaMetadataColumnText(const BasicItemInfo_t &itemInfo,
 
 	if (!SUCCEEDED(hr))
 	{
-		return EMPTY_STRING;
+		return L"";
 	}
 
 	TCHAR szOutput[512];
@@ -820,11 +832,11 @@ std::wstring GetMediaMetadataColumnText(const BasicItemInfo_t &itemInfo,
 
 		if (bitRate > 1000)
 		{
-			StringCchPrintf(szOutput, SIZEOF_ARRAY(szOutput), _T("%d kbps"), bitRate / 1000);
+			StringCchPrintf(szOutput, std::size(szOutput), _T("%d kbps"), bitRate / 1000);
 		}
 		else
 		{
-			StringCchPrintf(szOutput, SIZEOF_ARRAY(szOutput), _T("%d bps"), bitRate);
+			StringCchPrintf(szOutput, std::size(szOutput), _T("%d bps"), bitRate);
 		}
 	}
 	break;
@@ -843,18 +855,18 @@ std::wstring GetMediaMetadataColumnText(const BasicItemInfo_t &itemInfo,
 			boost::posix_time::microseconds(*(reinterpret_cast<QWORD *>(tempBuffer)) / 10);
 		dateStream << duration;
 
-		StringCchCopy(szOutput, SIZEOF_ARRAY(szOutput), dateStream.str().c_str());
+		StringCchCopy(szOutput, std::size(szOutput), dateStream.str().c_str());
 	}
 	break;
 
 	case MediaMetadataType::Protected:
 		if (*(reinterpret_cast<BOOL *>(tempBuffer)))
 		{
-			StringCchCopy(szOutput, SIZEOF_ARRAY(szOutput), L"Yes");
+			StringCchCopy(szOutput, std::size(szOutput), L"Yes");
 		}
 		else
 		{
-			StringCchCopy(szOutput, SIZEOF_ARRAY(szOutput), L"No");
+			StringCchCopy(szOutput, std::size(szOutput), L"No");
 		}
 		break;
 
@@ -880,7 +892,7 @@ std::wstring GetMediaMetadataColumnText(const BasicItemInfo_t &itemInfo,
 	case MediaMetadataType::Writer:
 	case MediaMetadataType::Year:
 	default:
-		StringCchCopy(szOutput, SIZEOF_ARRAY(szOutput), reinterpret_cast<TCHAR *>(tempBuffer));
+		StringCchCopy(szOutput, std::size(szOutput), reinterpret_cast<TCHAR *>(tempBuffer));
 		break;
 	}
 
@@ -981,12 +993,11 @@ std::wstring GetDriveSpaceColumnText(const BasicItemInfo_t &itemInfo, bool Total
 
 	if (!res)
 	{
-		return EMPTY_STRING;
+		return L"";
 	}
 
-	SizeDisplayFormat displayFormat = globalFolderSettings.forceSize
-		? globalFolderSettings.sizeDisplayFormat
-		: SizeDisplayFormat::None;
+	auto displayFormat = globalFolderSettings.forceSize ? globalFolderSettings.sizeDisplayFormat
+														: +SizeDisplayFormat::None;
 	return FormatSizeString(driveSpace.QuadPart, displayFormat);
 }
 

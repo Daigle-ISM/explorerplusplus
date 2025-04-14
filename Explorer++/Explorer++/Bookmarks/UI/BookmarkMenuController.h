@@ -8,14 +8,17 @@
 
 class BookmarkItem;
 class BookmarkTree;
+class BrowserWindow;
 class CoreInterface;
-class Navigator;
+class IconResourceLoader;
+class ThemeManager;
 
 class BookmarkMenuController
 {
 public:
-	BookmarkMenuController(BookmarkTree *bookmarkTree, CoreInterface *coreInterface,
-		Navigator *navigator, HWND parentWindow);
+	BookmarkMenuController(BookmarkTree *bookmarkTree, BrowserWindow *browserWindow,
+		CoreInterface *coreInterface, const IconResourceLoader *iconResourceLoader,
+		HWND parentWindow, ThemeManager *themeManager);
 
 	void OnMenuItemSelected(const BookmarkItem *bookmarkItem, bool isCtrlKeyDown,
 		bool isShiftKeyDown);
@@ -24,8 +27,8 @@ public:
 	void OnMenuItemRightClicked(BookmarkItem *bookmarkItem, const POINT &pt);
 
 private:
-	CoreInterface *m_coreInterface;
-	Navigator *m_navigator;
+	BrowserWindow *m_browserWindow = nullptr;
+	CoreInterface *m_coreInterface = nullptr;
 	HWND m_parentWindow;
 	BookmarkContextMenu m_bookmarkContextMenu;
 };

@@ -4,28 +4,31 @@
 
 #pragma once
 
-#include "ApplicationContextMenu.h"
+#include "ApplicationDropper.h"
+#include "ApplicationExecutorImpl.h"
 #include "ToolbarView.h"
 #include "../Helper/DropTargetWindow.h"
 #include <boost/signals2.hpp>
 #include <wil/com.h>
 #include <vector>
 
+class App;
 class CoreInterface;
 struct MouseEvent;
+class ThemeManager;
 
 namespace Applications
 {
 
-class ApplicationModel;
 class Application;
+class ApplicationModel;
 class ApplicationToolbarView;
 
 class ApplicationToolbar : private DropTargetInternal
 {
 public:
 	static ApplicationToolbar *Create(ApplicationToolbarView *view, ApplicationModel *model,
-		CoreInterface *coreInterface);
+		App *app, CoreInterface *coreInterface, ThemeManager *themeManager);
 
 	ApplicationToolbar(const ApplicationToolbar &) = delete;
 	ApplicationToolbar(ApplicationToolbar &&) = delete;
@@ -35,8 +38,32 @@ public:
 	ApplicationToolbarView *GetView() const;
 
 private:
-	ApplicationToolbar(ApplicationToolbarView *view, ApplicationModel *model,
-		CoreInterface *coreInterface);
+	class DragData
+	{
+	public:
+		DragData(IDataObject *dataObject, std::unique_ptr<ApplicationDropper> applicationDropper) :
+			m_dataObject(dataObject),
+			m_applicationDropper(std::move(applicationDropper))
+		{
+		}
+
+		IDataObject *GetDataObject() const
+		{
+			return m_dataObject.get();
+		}
+
+		ApplicationDropper *GetApplicationDropper() const
+		{
+			return m_applicationDropper.get();
+		}
+
+	private:
+		wil::com_ptr_nothrow<IDataObject> m_dataObject;
+		std::unique_ptr<ApplicationDropper> m_applicationDropper;
+	};
+
+	ApplicationToolbar(ApplicationToolbarView *view, ApplicationModel *model, App *app,
+		CoreInterface *coreInterface, ThemeManager *themeManager);
 
 	void Initialize();
 
@@ -60,25 +87,24 @@ private:
 	void DragLeave() override;
 	DWORD Drop(IDataObject *dataObject, DWORD keyState, POINT pt, DWORD effect) override;
 
-	void StoreDropShellItemArray(IDataObject *dataObject);
-	DWORD GetDropEffect(const ToolbarView::DropLocation &target);
-	DWORD PerformDrop(const ToolbarView::DropLocation &target);
-	DWORD DropItemsOnButton(size_t target);
-	DWORD AddDropItems(size_t startingIndex);
-	HRESULT AddDropItem(IShellItem *shellItem, size_t index);
+	ApplicationDropper::DropTarget DropLocationToTarget(
+		const ToolbarView::DropLocation &dropLocation);
+	DWORD OnDragOver(POINT pt);
 	void ResetDropState();
+	const DragData &GetDragData() const;
 
 	ApplicationToolbarView *m_view;
 	ApplicationModel *m_model;
-	CoreInterface *m_coreInterface;
-	ApplicationContextMenu m_contextMenu;
+	ApplicationExecutorImpl m_applicationExecutor;
+	App *const m_app;
+	CoreInterface *const m_coreInterface;
+	ThemeManager *const m_themeManager;
 
 	std::vector<boost::signals2::scoped_connection> m_connections;
 
 	// Drag and drop
 	winrt::com_ptr<DropTargetWindow> m_dropTargetWindow;
-	wil::com_ptr_nothrow<IShellItemArray> m_dropShellItems;
-	std::optional<bool> m_areAllDropItemsFolders;
+	std::optional<DragData> m_dragData;
 };
 
 }

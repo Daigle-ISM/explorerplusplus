@@ -4,22 +4,21 @@
 
 #pragma once
 
+#include "../Helper/WeakPtrFactory.h"
 #include <wil/com.h>
 #include <wil/resource.h>
-#include <memory>
 
 class BookmarkItem;
 class IconFetcher;
-class CoreInterface;
+class IconResourceLoader;
 
 class BookmarkIconManager
 {
 public:
 	using IconAvailableCallback = std::function<void(int iconIndex)>;
 
-	BookmarkIconManager(CoreInterface *coreInterface, IconFetcher *iconFetcher, int iconWidth,
-		int iconHeight);
-	~BookmarkIconManager();
+	BookmarkIconManager(const IconResourceLoader *iconResourceLoader, IconFetcher *iconFetcher,
+		int iconWidth, int iconHeight);
 
 	BookmarkIconManager(const BookmarkIconManager &other) = delete;
 	BookmarkIconManager(const BookmarkIconManager &&other) = delete;
@@ -34,8 +33,6 @@ private:
 	int GetIconForBookmark(const BookmarkItem *bookmark, IconAvailableCallback callback);
 	int AddSystemIconToImageList(int systemIconIndex);
 
-	CoreInterface *m_coreInterface;
-
 	wil::unique_himagelist m_imageList;
 
 	wil::com_ptr_nothrow<IImageList> m_systemImageList;
@@ -44,5 +41,5 @@ private:
 	int m_bookmarkFolderIconIndex;
 	IconFetcher *m_iconFetcher;
 
-	std::shared_ptr<bool> m_destroyed;
+	WeakPtrFactory<BookmarkIconManager> m_weakPtrFactory;
 };

@@ -15,11 +15,12 @@
 class BookmarkNavigationController;
 class BookmarkTree;
 class BookmarkTreeView;
+class BrowserWindow;
 class CoreInterface;
 class IconFetcher;
+class IconResourceLoader;
 class ManageBookmarksDialog;
-class Navigator;
-class WindowSubclassWrapper;
+class WindowSubclass;
 
 class ManageBookmarksDialogPersistentSettings : public DialogSettings
 {
@@ -49,8 +50,10 @@ private:
 class ManageBookmarksDialog : public ThemedDialog
 {
 public:
-	ManageBookmarksDialog(HINSTANCE resourceInstance, HWND hParent, CoreInterface *coreInterface,
-		Navigator *navigator, IconFetcher *iconFetcher, BookmarkTree *bookmarkTree);
+	ManageBookmarksDialog(HINSTANCE resourceInstance, HWND hParent, ThemeManager *themeManager,
+		BrowserWindow *browserWindow, CoreInterface *coreInterface,
+		const IconResourceLoader *iconResourceLoader, IconFetcher *iconFetcher,
+		BookmarkTree *bookmarkTree);
 	~ManageBookmarksDialog();
 
 protected:
@@ -84,7 +87,7 @@ private:
 	LRESULT CALLBACK ToolbarParentWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 	void OnTreeViewSelectionChanged(BookmarkItem *bookmarkFolder);
-	void OnListViewNavigation(BookmarkItem *bookmarkFolder, bool addHistoryEntry);
+	void OnListViewNavigation(BookmarkItem *bookmarkFolder, const BookmarkHistoryEntry *entry);
 
 	void UpdateToolbarState();
 
@@ -116,21 +119,22 @@ private:
 	wil::unique_himagelist m_imageListToolbar;
 	IconImageListMapping m_imageListToolbarMappings;
 
-	CoreInterface *m_coreInterface;
-	Navigator *m_navigator;
-	IconFetcher *m_iconFetcher;
+	BrowserWindow *m_browserWindow = nullptr;
+	CoreInterface *m_coreInterface = nullptr;
+	const IconResourceLoader *const m_iconResourceLoader;
+	IconFetcher *m_iconFetcher = nullptr;
 
-	BookmarkTree *m_bookmarkTree;
+	BookmarkTree *m_bookmarkTree = nullptr;
 
-	BookmarkItem *m_currentBookmarkFolder;
+	BookmarkItem *m_currentBookmarkFolder = nullptr;
 
-	BookmarkTreeView *m_bookmarkTreeView;
-	BookmarkListView *m_bookmarkListView;
+	BookmarkTreeView *m_bookmarkTreeView = nullptr;
+	BookmarkListView *m_bookmarkListView = nullptr;
 
 	std::unique_ptr<BookmarkNavigationController> m_navigationController;
 
-	std::vector<std::unique_ptr<WindowSubclassWrapper>> m_windowSubclasses;
+	std::vector<std::unique_ptr<WindowSubclass>> m_windowSubclasses;
 	std::vector<boost::signals2::scoped_connection> m_connections;
 
-	ManageBookmarksDialogPersistentSettings *m_persistentSettings;
+	ManageBookmarksDialogPersistentSettings *m_persistentSettings = nullptr;
 };

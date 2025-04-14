@@ -1,7 +1,9 @@
-version: 1.4.0.{build}
+version: 1.5.0.{build}
 image: Visual Studio 2022
 
-configuration: Release
+configuration:
+- Debug-Asan
+- Release
 
 platform:
 - Win32
@@ -18,8 +20,13 @@ cache:
   - vcpkg_installed -> vcpkg.json
   - '%LOCALAPPDATA%\vcpkg\archives -> vcpkg.json'
 
-for:
+matrix:
+  fast_finish: true
+  exclude:
+    - configuration: Debug-Asan
+      platform: ARM64
 
+for:
 -
   branches:
     only:
@@ -27,8 +34,32 @@ for:
 
   skip_non_tags: true
 
+-
+  matrix:
+    only:
+      - platform: Win32
+
+  environment:
+    arch: x86
+
+-
+  matrix:
+    only:
+      - platform: x64
+
+  environment:
+    arch: x64
+
+-
+  matrix:
+    only:
+      - platform: ARM64
+
+  environment:
+    arch: arm64
+
 init:
-- ps: >-
+- pwsh: >-
     if ($env:APPVEYOR_PULL_REQUEST_HEAD_REPO_BRANCH -match '^l10n_') {
       Write-Host 'Skipping translation branch pull request'
       Exit-AppveyorBuild
@@ -48,7 +79,7 @@ install:
     IF DEFINED PFX_ENC_PASS (secure-file\tools\secure-file -decrypt %APPVEYOR_BUILD_FOLDER%\authenticode.pfx.enc -secret %PFX_ENC_PASS%)
 
 before_build:
-- ps: >-
+- pwsh: >-
     if (Test-Path env:APPVEYOR_REPO_TAG_NAME) {
       if ($env:APPVEYOR_REPO_TAG_NAME -match '-beta(-\d)?$') {
         $env:RELEASE_MODE = 'beta'
@@ -61,55 +92,11 @@ build:
   project: Explorer++\Explorer++.sln
   verbosity: minimal
 
-# Sign and package the executable.
 after_build:
-- cmd: >-
-    cd %APPVEYOR_BUILD_FOLDER%
-
-
-    IF "%PLATFORM%" == "Win32" ( SET "arch=x86" ) ELSE IF "%PLATFORM%" == "x64" ( SET "arch=x64" ) ELSE IF "%PLATFORM%" == "ARM64" ( SET "arch=arm64" )
-
-
-    SET "archiveName=explorerpp_%arch%.zip"
-
-
-    7z a %archiveName% %APPVEYOR_BUILD_FOLDER%\Explorer++\Explorer++\%PLATFORM%\%CONFIGURATION%\Explorer++.exe
-
-    7z a %archiveName% %APPVEYOR_BUILD_FOLDER%\Documentation\User\History.txt
-
-    7z a %archiveName% %APPVEYOR_BUILD_FOLDER%\Documentation\User\License.txt
-
-    7z a %archiveName% %APPVEYOR_BUILD_FOLDER%\Documentation\User\Readme.txt
-
-
-    7z a explorerpp_%arch%_symbols.zip %APPVEYOR_BUILD_FOLDER%\Explorer++\Explorer++\%PLATFORM%\%CONFIGURATION%\Explorer++.pdb
-
-
-    IF NOT "%PLATFORM%" == "ARM64" ( copy "%APPVEYOR_BUILD_FOLDER%\Explorer++\Installer\bin\%arch%\%CONFIGURATION%\explorerpp_%arch%_setup.msi" . )
-
-
-    7z a explorerpp_translations.zip %APPVEYOR_BUILD_FOLDER%\Explorer++\Win32\%CONFIGURATION%\Explorer++*.dll
-
-
-    (echo.|set /p="%APPVEYOR_BUILD_VERSION%")>latest_version.txt || ver>nul
+- pwsh: .appveyor\after_build.ps1
 
 test_script:
-- ps: >-
-    if ($env:PLATFORM -ne "ARM64") {
-        cd $env:APPVEYOR_BUILD_FOLDER\Explorer++\TestExplorer++\$env:PLATFORM\$env:CONFIGURATION
-
-
-        # Run the tests.
-
-        .\TestExplorer++.exe --gtest_output=xml:TestExplorer++Output.xml
-
-
-        # Upload results to AppVeyor.
-
-        $wc = New-Object 'System.Net.WebClient'
-
-        $wc.UploadFile("https://ci.appveyor.com/api/testresults/junit/$($env:APPVEYOR_JOB_ID)", (Resolve-Path .\TestExplorer++Output.xml))
-    }
+- pwsh: .appveyor\test_script.ps1
 
 artifacts:
 - path: explorerpp_x86.zip
@@ -124,7 +111,7 @@ artifacts:
 - path: latest_version.txt
 
 before_deploy:
-- ps: >-
+- pwsh: >-
     $versionComponents = $env:APPVEYOR_BUILD_VERSION -split '\.'
 
     $versionComponents = $versionComponents[0, 1, 2]
@@ -152,6 +139,8 @@ deploy:
     draft: true
     on:
       APPVEYOR_REPO_TAG: true
+      configuration: Release
+      branch: master
 
   - provider: S3
     access_key_id:
@@ -165,6 +154,8 @@ deploy:
     set_content_type: true
     on:
       APPVEYOR_REPO_TAG: false
+      configuration: Release
+      branch: master
 
   - provider: S3
     access_key_id:
@@ -179,3 +170,5 @@ deploy:
     on:
       APPVEYOR_REPO_TAG: false
       platform: ARM64
+      configuration: Release
+      branch: master

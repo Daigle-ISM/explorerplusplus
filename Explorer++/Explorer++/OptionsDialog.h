@@ -10,15 +10,16 @@
 #include <optional>
 #include <unordered_map>
 
+class App;
 struct Config;
 class CoreInterface;
 class OptionsPage;
-class WindowSubclassWrapper;
+class WindowSubclass;
 
 class OptionsDialog : public ThemedDialog
 {
 public:
-	OptionsDialog(HINSTANCE resourceInstance, HWND parent, std::shared_ptr<Config> config,
+	OptionsDialog(HINSTANCE resourceInstance, HWND parent, App *app, Config *config,
 		CoreInterface *coreInterface);
 
 private:
@@ -57,11 +58,12 @@ private:
 	INT_PTR OnDestroy() override;
 	INT_PTR OnNcDestroy() override;
 
-	std::shared_ptr<Config> m_config;
+	App *const m_app;
+	Config *const m_config;
 	HINSTANCE m_resourceInstance;
 	CoreInterface *m_coreInterface;
 
-	std::vector<std::unique_ptr<WindowSubclassWrapper>> m_windowSubclasses;
+	std::vector<std::unique_ptr<WindowSubclass>> m_windowSubclasses;
 
 	int m_idCounter = 0;
 	std::unordered_map<int, std::unique_ptr<OptionsPage>> m_pageMap;

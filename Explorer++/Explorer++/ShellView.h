@@ -4,10 +4,10 @@
 
 #pragma once
 
+#include "../Helper/WeakPtr.h"
 #include "../Helper/WinRTBaseWrapper.h"
-#include <memory>
 
-class ShellBrowser;
+class ShellBrowserImpl;
 class TabNavigationInterface;
 
 // This isn't a complete implementation. There's only enough functionality to support the "New
@@ -16,7 +16,7 @@ class TabNavigationInterface;
 class ShellView : public winrt::implements<ShellView, IShellView, winrt::non_agile>
 {
 public:
-	ShellView(std::weak_ptr<ShellBrowser> shellBrowserWeak, TabNavigationInterface *tabNavigation,
+	ShellView(WeakPtr<ShellBrowserImpl> shellBrowserWeak, TabNavigationInterface *tabNavigation,
 		bool switchToTabOnSelect);
 
 	// IShellView
@@ -39,9 +39,9 @@ public:
 	IFACEMETHODIMP ContextSensitiveHelp(BOOL enterMode);
 
 private:
-	std::weak_ptr<ShellBrowser> m_shellBrowserWeak;
-	TabNavigationInterface *m_tabNavigation;
-	bool m_switchToTabOnSelect;
+	const WeakPtr<ShellBrowserImpl> m_shellBrowserWeak;
+	TabNavigationInterface *const m_tabNavigation;
+	const bool m_switchToTabOnSelect;
 };
 
 namespace winrt

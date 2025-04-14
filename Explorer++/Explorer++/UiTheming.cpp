@@ -4,25 +4,24 @@
 
 #include "stdafx.h"
 #include "UiTheming.h"
+#include "App.h"
 #include "CoreInterface.h"
-#include "ShellBrowser/ShellBrowser.h"
+#include "ShellBrowser/ShellBrowserImpl.h"
 #include "Tab.h"
-#include "TabContainer.h"
+#include "TabContainerImpl.h"
 
-UiTheming::UiTheming(CoreInterface *coreInterface, TabContainer *tabContainer) :
+UiTheming::UiTheming(App *app, CoreInterface *coreInterface, TabContainerImpl *tabContainerImpl) :
 	m_coreInterface(coreInterface),
-	m_tabContainer(tabContainer),
+	m_tabContainerImpl(tabContainerImpl),
 	m_customListViewColorsApplied(false)
 {
-	m_connections.emplace_back(m_tabContainer->tabCreatedSignal.AddObserver(
-		std::bind_front(&UiTheming::OnTabCreated, this)));
+	m_connections.emplace_back(app->GetTabEvents()->AddCreatedObserver(
+		std::bind_front(&UiTheming::OnTabCreated, this), TabEventScope::Global()));
 }
 
-void UiTheming::OnTabCreated(int tabId, BOOL switchToNewTab)
+void UiTheming::OnTabCreated(const Tab &tab, bool selected)
 {
-	UNREFERENCED_PARAMETER(switchToNewTab);
-
-	const Tab &tab = m_tabContainer->GetTab(tabId);
+	UNREFERENCED_PARAMETER(selected);
 
 	if (m_customListViewColorsApplied)
 	{
@@ -45,7 +44,7 @@ bool UiTheming::ApplyListViewColorsForAllTabs(COLORREF backgroundColor, COLORREF
 {
 	bool overallResult = true;
 
-	for (const auto &item : m_tabContainer->GetAllTabs())
+	for (const auto &item : m_tabContainerImpl->GetAllTabs())
 	{
 		bool res = ApplyListViewColorsForTab(*item.second, backgroundColor, textColor);
 
@@ -61,11 +60,12 @@ bool UiTheming::ApplyListViewColorsForAllTabs(COLORREF backgroundColor, COLORREF
 bool UiTheming::ApplyListViewColorsForTab(const Tab &tab, COLORREF backgroundColor,
 	COLORREF textColor)
 {
-	BOOL bkRes = ListView_SetBkColor(tab.GetShellBrowser()->GetListView(), backgroundColor);
-	BOOL textBkRes = ListView_SetTextBkColor(tab.GetShellBrowser()->GetListView(), backgroundColor);
-	BOOL textRes = ListView_SetTextColor(tab.GetShellBrowser()->GetListView(), textColor);
+	BOOL bkRes = ListView_SetBkColor(tab.GetShellBrowserImpl()->GetListView(), backgroundColor);
+	BOOL textBkRes =
+		ListView_SetTextBkColor(tab.GetShellBrowserImpl()->GetListView(), backgroundColor);
+	BOOL textRes = ListView_SetTextColor(tab.GetShellBrowserImpl()->GetListView(), textColor);
 
-	InvalidateRect(tab.GetShellBrowser()->GetListView(), nullptr, TRUE);
+	InvalidateRect(tab.GetShellBrowserImpl()->GetListView(), nullptr, TRUE);
 
 	if (!bkRes || !textBkRes || !textRes)
 	{

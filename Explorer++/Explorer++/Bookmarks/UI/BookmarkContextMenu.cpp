@@ -5,15 +5,21 @@
 #include "stdafx.h"
 #include "Bookmarks/UI/BookmarkContextMenu.h"
 #include "Bookmarks/BookmarkClipboard.h"
+#include "Bookmarks/BookmarkTree.h"
+#include "BrowserWindow.h"
 #include "MainResource.h"
 #include "ResourceHelper.h"
 #include "../Helper/MenuHelper.h"
+#include <glog/logging.h>
 #include <wil/resource.h>
 
 BookmarkContextMenu::BookmarkContextMenu(BookmarkTree *bookmarkTree, HINSTANCE resourceInstance,
-	CoreInterface *coreInterface, Navigator *navigator) :
+	BrowserWindow *browserWindow, CoreInterface *coreInterface,
+	const IconResourceLoader *iconResourceLoader, ThemeManager *themeManager) :
+	m_bookmarkTree(bookmarkTree),
 	m_resourceInstance(resourceInstance),
-	m_controller(bookmarkTree, resourceInstance, coreInterface, navigator),
+	m_controller(bookmarkTree, resourceInstance, browserWindow, coreInterface, iconResourceLoader,
+		themeManager),
 	m_showingMenu(false)
 {
 }
@@ -21,7 +27,7 @@ BookmarkContextMenu::BookmarkContextMenu(BookmarkTree *bookmarkTree, HINSTANCE r
 BOOL BookmarkContextMenu::ShowMenu(HWND parentWindow, BookmarkItem *parentFolder,
 	const RawBookmarkItems &bookmarkItems, const POINT &ptScreen, MenuType menuType)
 {
-	assert(!bookmarkItems.empty());
+	DCHECK(!bookmarkItems.empty());
 
 	wil::unique_hmenu parentMenu;
 
@@ -56,7 +62,7 @@ BOOL BookmarkContextMenu::ShowMenu(HWND parentWindow, BookmarkItem *parentFolder
 
 	m_showingMenu = true;
 
-	int menuItemId = TrackPopupMenu(menu, flags, ptScreen.x, ptScreen.y, 0, parentWindow, nullptr);
+	UINT menuItemId = TrackPopupMenu(menu, flags, ptScreen.x, ptScreen.y, 0, parentWindow, nullptr);
 
 	m_showingMenu = false;
 
@@ -153,11 +159,18 @@ void BookmarkContextMenu::SetUpMenu(HMENU menu, const RawBookmarkItems &bookmark
 		}
 	}
 
-	SetMenuItemStates(menu);
+	SetMenuItemStates(menu, bookmarkItems);
 }
 
-void BookmarkContextMenu::SetMenuItemStates(HMENU menu)
+void BookmarkContextMenu::SetMenuItemStates(HMENU menu, const RawBookmarkItems &bookmarkItems)
 {
+	if ((bookmarkItems.size() == 1) && m_bookmarkTree->IsPermanentNode(bookmarkItems[0]))
+	{
+		MenuHelper::EnableItem(menu, IDM_BOOKMARKS_CUT, false);
+		MenuHelper::EnableItem(menu, IDM_BOOKMARKS_DELETE, false);
+		MenuHelper::EnableItem(menu, IDM_BOOKMARKS_PROPERTIES, false);
+	}
+
 	MenuHelper::EnableItem(menu, IDM_BOOKMARKS_PASTE,
 		IsClipboardFormatAvailable(BookmarkClipboard::GetClipboardFormat()));
 }

@@ -5,6 +5,7 @@
 #include "stdafx.h"
 #include "ProcessHelper.h"
 #include "Helper.h"
+#include <wil/resource.h>
 
 DWORD GetProcessImageName(DWORD dwProcessId, TCHAR *szImageName, DWORD nSize)
 {
@@ -64,47 +65,25 @@ BOOL GetProcessOwner(DWORD dwProcessId, TCHAR *szOwner, size_t cchMax)
 	return success;
 }
 
-BOOL SetProcessTokenPrivilege(DWORD dwProcessId, const TCHAR *PrivilegeName, BOOL bEnablePrivilege)
+bool IsProcessElevated()
 {
-	BOOL success = FALSE;
+	wil::unique_handle token;
+	BOOL res = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token);
 
-	HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, dwProcessId);
-
-	if (hProcess != nullptr)
+	if (!res)
 	{
-		HANDLE hToken;
-		BOOL bRet = OpenProcessToken(hProcess, TOKEN_ADJUST_PRIVILEGES, &hToken);
-
-		if (bRet)
-		{
-			LUID luid;
-			bRet = LookupPrivilegeValue(nullptr, PrivilegeName, &luid);
-
-			if (bRet)
-			{
-				TOKEN_PRIVILEGES tp;
-				tp.PrivilegeCount = 1;
-				tp.Privileges[0].Luid = luid;
-
-				if (bEnablePrivilege)
-				{
-					tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-				}
-				else
-				{
-					tp.Privileges[0].Attributes = 0;
-				}
-
-				bRet = AdjustTokenPrivileges(hToken, FALSE, &tp, 0, nullptr, nullptr);
-
-				success = bRet && (GetLastError() == ERROR_SUCCESS);
-			}
-
-			CloseHandle(hToken);
-		}
-
-		CloseHandle(hProcess);
+		return false;
 	}
 
-	return success;
+	TOKEN_ELEVATION tokenElevation;
+	DWORD outputSize;
+	res = GetTokenInformation(token.get(), TokenElevation, &tokenElevation, sizeof(tokenElevation),
+		&outputSize);
+
+	if (!res)
+	{
+		return false;
+	}
+
+	return tokenElevation.TokenIsElevated;
 }

@@ -10,6 +10,7 @@
 #include "../Helper/Helper.h"
 #include "../Helper/ResizableDialogHelper.h"
 #include "../Helper/RichEditHelper.h"
+#include <glog/logging.h>
 
 const boost::bimap<bool, std::wstring> BOOL_MAPPINGS =
 	MakeBimap<bool, std::wstring>({ { true, L"true" }, { false, L"false" } });
@@ -64,7 +65,7 @@ void AdvancedOptionsPage::InitializeControls()
 	ListView_SetColumnWidth(listView, 1, LVSCW_AUTOSIZE_USEHEADER);
 
 	int orderArray[] = { 1, 0 };
-	ListView_SetColumnOrderArray(listView, SIZEOF_ARRAY(orderArray), orderArray);
+	ListView_SetColumnOrderArray(listView, std::size(orderArray), orderArray);
 
 	m_advancedOptions = InitializeAdvancedOptions();
 
@@ -162,7 +163,7 @@ bool AdvancedOptionsPage::GetBooleanConfigValue(AdvancedOptionId id)
 		return m_config->showQuickAccessInTreeView.get();
 
 	default:
-		assert(false);
+		DCHECK(false);
 		break;
 	}
 
@@ -190,7 +191,7 @@ void AdvancedOptionsPage::SetBooleanConfigValue(AdvancedOptionId id, bool value)
 		break;
 
 	default:
-		assert(false);
+		DCHECK(false);
 		break;
 	}
 }
@@ -289,7 +290,7 @@ INT_PTR AdvancedOptionsPage::OnNotify(WPARAM wParam, LPARAM lParam)
 			&& linkNotificationDetails->msg == WM_LBUTTONUP)
 		{
 			std::wstring text = GetRichEditLinkText(linkNotificationDetails);
-			ShellExecute(nullptr, L"open", text.c_str(), nullptr, nullptr, SW_SHOW);
+			ShellExecute(nullptr, L"open", text.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 			return 1;
 		}
 	}
@@ -306,11 +307,7 @@ AdvancedOptionsPage::AdvancedOption *AdvancedOptionsPage::GetAdvancedOptionByInd
 	lvItem.iItem = index;
 	lvItem.iSubItem = 0;
 	BOOL res = ListView_GetItem(GetDlgItem(GetDialog(), IDC_ADVANCED_OPTIONS), &lvItem);
-
-	if (!res)
-	{
-		throw std::runtime_error("Item lookup failed");
-	}
+	CHECK(res) << "Item lookup failed";
 
 	return reinterpret_cast<AdvancedOption *>(lvItem.lParam);
 }
@@ -323,7 +320,7 @@ void AdvancedOptionsPage::SaveSettings()
 	for (int i = 0; i < numItems; i++)
 	{
 		TCHAR text[256];
-		ListView_GetItemText(listView, i, 0, text, SIZEOF_ARRAY(text));
+		ListView_GetItemText(listView, i, 0, text, std::size(text));
 
 		auto &option = m_advancedOptions[i];
 
@@ -338,15 +335,4 @@ void AdvancedOptionsPage::SaveSettings()
 		break;
 		}
 	}
-}
-
-bool AdvancedOptionsPage::DoesPageContainText(const std::wstring &text,
-	StringComparatorFunc stringComparator)
-{
-	auto itr = std::find_if(m_advancedOptions.begin(), m_advancedOptions.end(),
-		[&text, stringComparator](const auto &option) {
-			return stringComparator(option.name, text)
-				|| stringComparator(option.description, text);
-		});
-	return itr != m_advancedOptions.end();
 }

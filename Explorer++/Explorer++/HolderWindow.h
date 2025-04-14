@@ -9,7 +9,9 @@
 #include <functional>
 #include <optional>
 
-class CoreInterface;
+struct Config;
+class DarkModeManager;
+class IconResourceLoader;
 class MainFontSetter;
 
 class HolderWindow
@@ -19,7 +21,8 @@ public:
 	using CloseButtonClickedCallback = std::function<void()>;
 
 	static HolderWindow *Create(HWND parent, const std::wstring &caption, DWORD style,
-		const std::wstring &closeButtonTooltip, CoreInterface *coreInterface);
+		const std::wstring &closeButtonTooltip, const Config *config,
+		const IconResourceLoader *iconResourceLoader, const DarkModeManager *darkModeManager);
 
 	HWND GetHWND() const;
 	void SetContentChild(HWND contentChild);
@@ -40,7 +43,8 @@ private:
 	static constexpr int RESIZE_START_RANGE = 6_px;
 
 	HolderWindow(HWND parent, const std::wstring &caption, DWORD style,
-		const std::wstring &closeButtonTooltip, CoreInterface *coreInterface);
+		const std::wstring &closeButtonTooltip, const Config *config,
+		const IconResourceLoader *iconResourceLoader, const DarkModeManager *darkModeManager);
 	HWND CreateHolderWindow(HWND parent, const std::wstring &caption, DWORD style);
 	static ATOM RegisterHolderWindowClass();
 
@@ -71,6 +75,7 @@ private:
 	bool m_initialized = false;
 
 	const HWND m_hwnd;
+	const DarkModeManager *const m_darkModeManager;
 	HWND m_contentChild = nullptr;
 	HFONT m_font = nullptr;
 	wil::unique_hfont m_defaultFont = nullptr;

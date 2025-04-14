@@ -9,16 +9,16 @@
 
 #include "stdafx.h"
 #include "Explorer++.h"
+#include "App.h"
 #include "MainResource.h"
 #include "ResourceHelper.h"
 #include "TabBacking.h"
-#include "TabContainer.h"
+#include "TabContainerImpl.h"
 #include "ToolbarHelper.h"
-#include "../Helper/Macros.h"
 
 void Explorerplusplus::CreateTabBacking()
 {
-	m_hTabBacking = CreateWindow(WC_STATIC, EMPTY_STRING,
+	m_hTabBacking = CreateWindow(WC_STATIC, L"",
 		WS_VISIBLE | WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | SS_NOTIFY, 0, 0, 0, 0,
 		m_hContainer, nullptr, GetModuleHandle(nullptr), nullptr);
 
@@ -26,8 +26,8 @@ void Explorerplusplus::CreateTabBacking()
 	Only contains the close button used to close tabs. */
 	std::tie(m_hTabWindowToolbar, m_tabWindowToolbarImageList) =
 		ToolbarHelper::CreateCloseButtonToolbar(m_hTabBacking, TABTOOLBAR_CLOSE,
-			ResourceHelper::LoadString(m_resourceInstance, IDS_TAB_CLOSE_TIP),
-			m_iconResourceLoader.get());
+			ResourceHelper::LoadString(m_app->GetResourceInstance(), IDS_TAB_CLOSE_TIP),
+			m_app->GetIconResourceLoader());
 
 	SIZE toolbarSize;
 	[[maybe_unused]] auto sizeRes =
@@ -37,41 +37,38 @@ void Explorerplusplus::CreateTabBacking()
 		SWP_NOZORDER | SWP_NOMOVE);
 
 	m_tabToolbarTooltipFontSetter = std::make_unique<MainFontSetter>(
-		reinterpret_cast<HWND>(SendMessage(m_hTabWindowToolbar, TB_GETTOOLTIPS, 0, 0)),
-		m_config.get());
+		reinterpret_cast<HWND>(SendMessage(m_hTabWindowToolbar, TB_GETTOOLTIPS, 0, 0)), m_config);
 
-	AddTabsInitializedObserver(std::bind_front(&Explorerplusplus::OnTabsInitialized, this));
-}
-
-void Explorerplusplus::OnTabsInitialized()
-{
-	GetActivePane()->GetTabContainer()->tabCreatedSignal.AddObserver(
-		[this](int tabId, BOOL switchToNewTab)
+	m_connections.push_back(m_app->GetTabEvents()->AddCreatedObserver(
+		[this](const Tab &tab, bool selected)
 		{
-			UNREFERENCED_PARAMETER(tabId);
-			UNREFERENCED_PARAMETER(switchToNewTab);
+			UNREFERENCED_PARAMETER(tab);
+			UNREFERENCED_PARAMETER(selected);
 
 			UpdateTabToolbar();
-		});
+		},
+		TabEventScope::ForBrowser(*this)));
 
-	GetActivePane()->GetTabContainer()->tabUpdatedSignal.AddObserver(
-		std::bind_front(&Explorerplusplus::OnTabUpdated, this));
-
-	GetActivePane()->GetTabContainer()->tabSelectedSignal.AddObserver(
+	m_connections.push_back(m_app->GetTabEvents()->AddSelectedObserver(
 		[this](const Tab &tab)
 		{
 			UNREFERENCED_PARAMETER(tab);
 
 			UpdateTabToolbar();
-		});
+		},
+		TabEventScope::ForBrowser(*this)));
 
-	GetActivePane()->GetTabContainer()->tabRemovedSignal.AddObserver(
-		[this](int tabId)
+	m_connections.push_back(m_app->GetTabEvents()->AddRemovedObserver(
+		[this](const Tab &tab)
 		{
-			UNREFERENCED_PARAMETER(tabId);
+			UNREFERENCED_PARAMETER(tab);
 
 			UpdateTabToolbar();
-		});
+		},
+		TabEventScope::ForBrowser(*this)));
+
+	m_connections.push_back(m_app->GetTabEvents()->AddUpdatedObserver(
+		std::bind_front(&Explorerplusplus::OnTabUpdated, this), TabEventScope::ForBrowser(*this)));
 }
 
 void Explorerplusplus::OnTabUpdated(const Tab &tab, Tab::PropertyType propertyType)
@@ -82,7 +79,7 @@ void Explorerplusplus::OnTabUpdated(const Tab &tab, Tab::PropertyType propertyTy
 		/* If the tab that was locked/unlocked is the
 		currently selected tab, then the tab close
 		button on the toolbar will need to be updated. */
-		if (GetActivePane()->GetTabContainer()->IsTabSelected(tab))
+		if (GetActivePane()->GetTabContainerImpl()->IsTabSelected(tab))
 		{
 			UpdateTabToolbar();
 		}
@@ -92,9 +89,9 @@ void Explorerplusplus::OnTabUpdated(const Tab &tab, Tab::PropertyType propertyTy
 
 void Explorerplusplus::UpdateTabToolbar()
 {
-	const int nTabs = GetActivePane()->GetTabContainer()->GetNumTabs();
+	const int nTabs = GetActivePane()->GetTabContainerImpl()->GetNumTabs();
 
-	const Tab &selectedTab = GetActivePane()->GetTabContainer()->GetSelectedTab();
+	const Tab &selectedTab = GetActivePane()->GetTabContainerImpl()->GetSelectedTab();
 
 	if (nTabs > 1 && selectedTab.GetLockState() == Tab::LockState::NotLocked)
 	{

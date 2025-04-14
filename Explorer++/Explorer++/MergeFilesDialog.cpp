@@ -4,15 +4,13 @@
 
 #include "stdafx.h"
 #include "MergeFilesDialog.h"
-#include "CoreInterface.h"
-#include "Explorer++_internal.h"
+#include "App.h"
 #include "IconResourceLoader.h"
 #include "MainResource.h"
 #include "ResourceHelper.h"
 #include "../Helper/FileOperations.h"
 #include "../Helper/Helper.h"
 #include "../Helper/ListViewHelper.h"
-#include "../Helper/Macros.h"
 #include "../Helper/ShellHelper.h"
 #include "../Helper/StringHelper.h"
 #include "../Helper/WindowHelper.h"
@@ -34,16 +32,17 @@ const TCHAR MergeFilesDialogPersistentSettings::SETTINGS_KEY[] = _T("MergeFiles"
 bool CompareFilenames(const std::wstring &strFirst, const std::wstring &strSecond);
 
 MergeFilesDialog::MergeFilesDialog(HINSTANCE resourceInstance, HWND hParent,
-	CoreInterface *coreInterface, const std::wstring &strOutputDirectory,
-	const std::list<std::wstring> &FullFilenameList, BOOL bShowFriendlyDates) :
-	ThemedDialog(resourceInstance, IDD_MERGEFILES, hParent, DialogSizingType::Both),
-	m_coreInterface(coreInterface),
+	ThemeManager *themeManager, const IconResourceLoader *iconResourceLoader,
+	const std::wstring &strOutputDirectory, const std::list<std::wstring> &FullFilenameList,
+	BOOL bShowFriendlyDates) :
+	ThemedDialog(resourceInstance, IDD_MERGEFILES, hParent, DialogSizingType::Both, themeManager),
+	m_iconResourceLoader(iconResourceLoader),
 	m_strOutputDirectory(strOutputDirectory),
 	m_FullFilenameList(FullFilenameList),
 	m_bShowFriendlyDates(bShowFriendlyDates),
+	m_pMergeFiles(nullptr),
 	m_bMergingFiles(false),
-	m_bStopMerging(false),
-	m_pMergeFiles(nullptr)
+	m_bStopMerging(false)
 {
 	m_persistentSettings = &MergeFilesDialogPersistentSettings::GetInstance();
 }
@@ -114,27 +113,26 @@ INT_PTR MergeFilesDialog::OnInitDialog()
 		LVS_EX_DOUBLEBUFFER | LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
 
 	LVCOLUMN lvColumn;
-	TCHAR szTemp[32];
 
-	LoadString(GetResourceInstance(), IDS_MERGE_FILES_COLUMN_FILE, szTemp, SIZEOF_ARRAY(szTemp));
+	auto fileText = ResourceHelper::LoadString(GetResourceInstance(), IDS_MERGE_FILES_COLUMN_FILE);
 	lvColumn.mask = LVCF_TEXT;
-	lvColumn.pszText = szTemp;
+	lvColumn.pszText = fileText.data();
 	ListView_InsertColumn(hListView, 0, &lvColumn);
 
-	LoadString(GetResourceInstance(), IDS_MERGE_FILES_COLUMN_TYPE, szTemp, SIZEOF_ARRAY(szTemp));
+	auto typeText = ResourceHelper::LoadString(GetResourceInstance(), IDS_MERGE_FILES_COLUMN_TYPE);
 	lvColumn.mask = LVCF_TEXT;
-	lvColumn.pszText = szTemp;
+	lvColumn.pszText = typeText.data();
 	ListView_InsertColumn(hListView, 1, &lvColumn);
 
-	LoadString(GetResourceInstance(), IDS_MERGE_FILES_COLUMN_SIZE, szTemp, SIZEOF_ARRAY(szTemp));
+	auto sizeText = ResourceHelper::LoadString(GetResourceInstance(), IDS_MERGE_FILES_COLUMN_SIZE);
 	lvColumn.mask = LVCF_TEXT;
-	lvColumn.pszText = szTemp;
+	lvColumn.pszText = sizeText.data();
 	ListView_InsertColumn(hListView, 2, &lvColumn);
 
-	LoadString(GetResourceInstance(), IDS_MERGE_FILES_COLUMN_DATE_MODIFIED, szTemp,
-		SIZEOF_ARRAY(szTemp));
+	auto dateModifiedText =
+		ResourceHelper::LoadString(GetResourceInstance(), IDS_MERGE_FILES_COLUMN_DATE_MODIFIED);
 	lvColumn.mask = LVCF_TEXT;
-	lvColumn.pszText = szTemp;
+	lvColumn.pszText = dateModifiedText.data();
 	ListView_InsertColumn(hListView, 3, &lvColumn);
 
 	int iItem = 0;
@@ -143,7 +141,7 @@ INT_PTR MergeFilesDialog::OnInitDialog()
 	{
 		TCHAR szFullFilename[MAX_PATH];
 
-		StringCchCopy(szFullFilename, SIZEOF_ARRAY(szFullFilename), strFullFilename.c_str());
+		StringCchCopy(szFullFilename, std::size(szFullFilename), strFullFilename.c_str());
 
 		/* TODO: Perform in background thread. */
 		SHFILEINFO shfi;
@@ -168,7 +166,7 @@ INT_PTR MergeFilesDialog::OnInitDialog()
 		ListView_SetItemText(hListView, iItem, 2, fileSizeText.data());
 
 		TCHAR szDateModified[32];
-		CreateFileTimeString(&wfad.ftLastWriteTime, szDateModified, SIZEOF_ARRAY(szDateModified),
+		CreateFileTimeString(&wfad.ftLastWriteTime, szDateModified, std::size(szDateModified),
 			m_bShowFriendlyDates);
 		ListView_SetItemText(hListView, iItem, 3, szDateModified);
 
@@ -190,8 +188,7 @@ INT_PTR MergeFilesDialog::OnInitDialog()
 
 wil::unique_hicon MergeFilesDialog::GetDialogIcon(int iconWidth, int iconHeight) const
 {
-	return m_coreInterface->GetIconResourceLoader()->LoadIconFromPNGAndScale(Icon::MergeFiles,
-		iconWidth, iconHeight);
+	return m_iconResourceLoader->LoadIconFromPNGAndScale(Icon::MergeFiles, iconWidth, iconHeight);
 }
 
 std::vector<ResizableDialogControl> MergeFilesDialog::GetResizableControls()
@@ -274,10 +271,9 @@ INT_PTR MergeFilesDialog::OnPrivateMessage(UINT uMsg, WPARAM wParam, LPARAM lPar
 
 	case NMergeFilesDialog::WM_APP_OUTPUTFILEINVALID:
 	{
-		TCHAR szTemp[64];
-		LoadString(GetResourceInstance(), IDS_MERGE_FILES_OUTPUTFILEINVALID, szTemp,
-			SIZEOF_ARRAY(szTemp));
-		MessageBox(m_hDlg, szTemp, NExplorerplusplus::APP_NAME, MB_ICONWARNING | MB_OK);
+		auto errorMessage =
+			ResourceHelper::LoadString(GetResourceInstance(), IDS_MERGE_FILES_OUTPUTFILEINVALID);
+		MessageBox(m_hDlg, errorMessage.c_str(), App::APP_NAME, MB_ICONWARNING | MB_OK);
 
 		assert(m_pMergeFiles != nullptr);
 
@@ -309,11 +305,9 @@ void MergeFilesDialog::OnOk()
 
 		if (GetWindowTextLength(hOutputFileName) == 0)
 		{
-			TCHAR szTemp[64];
-			LoadString(GetResourceInstance(), IDS_MERGE_OUTPUTINVALID, szTemp,
-				SIZEOF_ARRAY(szTemp));
-
-			MessageBox(m_hDlg, szTemp, NExplorerplusplus::APP_NAME, MB_ICONWARNING | MB_OK);
+			auto errorMessage =
+				ResourceHelper::LoadString(GetResourceInstance(), IDS_MERGE_OUTPUTINVALID);
+			MessageBox(m_hDlg, errorMessage.c_str(), App::APP_NAME, MB_ICONWARNING | MB_OK);
 			return;
 		}
 
@@ -323,11 +317,10 @@ void MergeFilesDialog::OnOk()
 
 		SendDlgItemMessage(m_hDlg, IDC_MERGE_PROGRESS, PBM_SETPOS, 0, 0);
 
-		GetDlgItemText(m_hDlg, IDOK, m_szOk, SIZEOF_ARRAY(m_szOk));
+		GetDlgItemText(m_hDlg, IDOK, m_szOk, static_cast<int>(std::size(m_szOk)));
 
-		TCHAR szTemp[64];
-		LoadString(GetResourceInstance(), IDS_CANCEL, szTemp, SIZEOF_ARRAY(szTemp));
-		SetDlgItemText(m_hDlg, IDOK, szTemp);
+		auto cancelText = ResourceHelper::LoadString(GetResourceInstance(), IDS_CANCEL);
+		SetDlgItemText(m_hDlg, IDOK, cancelText.c_str());
 
 		m_bMergingFiles = true;
 
@@ -361,11 +354,10 @@ void MergeFilesDialog::OnCancel()
 
 void MergeFilesDialog::OnChangeOutputDirectory()
 {
-	TCHAR szTitle[128];
-	LoadString(GetResourceInstance(), IDS_MERGE_SELECTDESTINATION, szTitle, SIZEOF_ARRAY(szTitle));
+	auto title = ResourceHelper::LoadString(GetResourceInstance(), IDS_MERGE_SELECTDESTINATION);
 
 	unique_pidl_absolute pidl;
-	BOOL bSucceeded = NFileOperations::CreateBrowseDialog(m_hDlg, szTitle, wil::out_param(pidl));
+	BOOL bSucceeded = FileOperations::CreateBrowseDialog(m_hDlg, title, wil::out_param(pidl));
 
 	if (!bSucceeded)
 	{
@@ -419,7 +411,7 @@ void MergeFilesDialog::OnMove(bool bUp)
 
 		std::iter_swap(itrSelected, itrSwap);
 
-		ListViewHelper::SwapItems(hListView, iSelected, iSwap, FALSE);
+		ListViewHelper::SwapItems(hListView, iSelected, iSwap);
 	}
 }
 

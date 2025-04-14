@@ -10,15 +10,19 @@
 #include "Bookmarks/BookmarkIconManager.h"
 #include "Bookmarks/BookmarkTree.h"
 #include "Bookmarks/UI/Views/BookmarksToolbarView.h"
+#include "BrowserWindow.h"
 #include "Config.h"
 #include "CoreInterface.h"
 #include "MainResource.h"
-#include "Navigator.h"
+#include "NavigationHelper.h"
 #include "ResourceHelper.h"
 #include "../Helper/DpiCompatibility.h"
 #include "../Helper/DropSourceImpl.h"
 #include "../Helper/MenuHelper.h"
+#include "../Helper/WeakPtr.h"
+#include "../Helper/WeakPtrFactory.h"
 #include "../Helper/WindowHelper.h"
+#include <glog/logging.h>
 #include <wil/com.h>
 #include <format>
 
@@ -30,14 +34,9 @@ public:
 		ToolbarButton(clickedCallback),
 		m_bookmarkItem(bookmarkItem),
 		m_bookmarkIconManager(bookmarkIconManager),
-		m_destroyed(std::make_shared<bool>(false))
+		m_weakPtrFactory(this)
 	{
-		assert(bookmarkItem->IsBookmark());
-	}
-
-	~BookmarksToolbarBookmarkButton()
-	{
-		*m_destroyed = true;
+		DCHECK(bookmarkItem->IsBookmark());
 	}
 
 	std::wstring GetText() const override
@@ -58,16 +57,14 @@ public:
 		}
 
 		m_iconIndex = m_bookmarkIconManager->GetBookmarkItemIconIndex(m_bookmarkItem,
-			[this, destroyed = m_destroyed](int iconIndex)
+			[self = m_weakPtrFactory.GetWeakPtr()](int iconIndex)
 			{
-				// This method is called on the main thread, so it's safe to access the shared
-				// destroyed variable here.
-				if (*destroyed)
+				if (!self)
 				{
 					return;
 				}
 
-				OnIconLoaded(iconIndex);
+				self->OnIconLoaded(iconIndex);
 			});
 
 		return *m_iconIndex;
@@ -92,7 +89,7 @@ private:
 	// Stores the cached icon index.
 	mutable std::optional<int> m_iconIndex;
 
-	std::shared_ptr<bool> m_destroyed;
+	WeakPtrFactory<BookmarksToolbarBookmarkButton> m_weakPtrFactory;
 };
 
 class BookmarksToolbarFolderButton : public ToolbarMenuButton
@@ -104,7 +101,7 @@ public:
 		m_bookmarkItem(bookmarkItem),
 		m_bookmarkIconManager(bookmarkIconManager)
 	{
-		assert(bookmarkItem->IsFolder());
+		DCHECK(bookmarkItem->IsFolder());
 	}
 
 	std::wstring GetText() const override
@@ -127,22 +124,28 @@ private:
 	BookmarkIconManager *m_bookmarkIconManager;
 };
 
-BookmarksToolbar *BookmarksToolbar::Create(BookmarksToolbarView *view, CoreInterface *coreInterface,
-	Navigator *navigator, IconFetcher *iconFetcher, BookmarkTree *bookmarkTree)
+BookmarksToolbar *BookmarksToolbar::Create(BookmarksToolbarView *view, BrowserWindow *browserWindow,
+	CoreInterface *coreInterface, const IconResourceLoader *iconResourceLoader,
+	IconFetcher *iconFetcher, BookmarkTree *bookmarkTree, ThemeManager *themeManager)
 {
-	return new BookmarksToolbar(view, coreInterface, navigator, iconFetcher, bookmarkTree);
+	return new BookmarksToolbar(view, browserWindow, coreInterface, iconResourceLoader, iconFetcher,
+		bookmarkTree, themeManager);
 }
 
-BookmarksToolbar::BookmarksToolbar(BookmarksToolbarView *view, CoreInterface *coreInterface,
-	Navigator *navigator, IconFetcher *iconFetcher, BookmarkTree *bookmarkTree) :
+BookmarksToolbar::BookmarksToolbar(BookmarksToolbarView *view, BrowserWindow *browserWindow,
+	CoreInterface *coreInterface, const IconResourceLoader *iconResourceLoader,
+	IconFetcher *iconFetcher, BookmarkTree *bookmarkTree, ThemeManager *themeManager) :
 	BookmarkDropTargetWindow(view->GetHWND(), bookmarkTree),
 	m_view(view),
+	m_browserWindow(browserWindow),
 	m_coreInterface(coreInterface),
-	m_navigator(navigator),
+	m_iconResourceLoader(iconResourceLoader),
 	m_bookmarkTree(bookmarkTree),
-	m_contextMenu(bookmarkTree, coreInterface->GetResourceInstance(), coreInterface, navigator),
-	m_bookmarkMenu(bookmarkTree, coreInterface->GetResourceInstance(), coreInterface, navigator,
-		iconFetcher, view->GetHWND())
+	m_themeManager(themeManager),
+	m_contextMenu(bookmarkTree, coreInterface->GetResourceInstance(), browserWindow, coreInterface,
+		iconResourceLoader, themeManager),
+	m_bookmarkMenu(bookmarkTree, coreInterface->GetResourceInstance(), browserWindow, coreInterface,
+		iconResourceLoader, iconFetcher, view->GetHWND(), themeManager)
 {
 	Initialize(iconFetcher);
 }
@@ -153,8 +156,8 @@ void BookmarksToolbar::Initialize(IconFetcher *iconFetcher)
 	UINT dpi = dpiCompat.GetDpiForWindow(m_view->GetHWND());
 	int iconWidth = dpiCompat.GetSystemMetricsForDpi(SM_CXSMICON, dpi);
 	int iconHeight = dpiCompat.GetSystemMetricsForDpi(SM_CYSMICON, dpi);
-	m_bookmarkIconManager =
-		std::make_unique<BookmarkIconManager>(m_coreInterface, iconFetcher, iconWidth, iconHeight);
+	m_bookmarkIconManager = std::make_unique<BookmarkIconManager>(m_iconResourceLoader, iconFetcher,
+		iconWidth, iconHeight);
 
 	m_view->SetImageList(m_bookmarkIconManager->GetImageList());
 
@@ -275,8 +278,8 @@ void BookmarksToolbar::OnBookmarkClicked(BookmarkItem *bookmarkItem, const Mouse
 	UNREFERENCED_PARAMETER(event);
 
 	BookmarkHelper::OpenBookmarkItemWithDisposition(bookmarkItem,
-		m_navigator->DetermineOpenDisposition(false, event.ctrlKey, event.shiftKey),
-		m_coreInterface, m_navigator);
+		DetermineOpenDisposition(false, event.ctrlKey, event.shiftKey), m_coreInterface,
+		m_browserWindow);
 }
 
 void BookmarksToolbar::OnBookmarkFolderClicked(BookmarkItem *bookmarkItem, const MouseEvent &event)
@@ -284,8 +287,8 @@ void BookmarksToolbar::OnBookmarkFolderClicked(BookmarkItem *bookmarkItem, const
 	if (event.ctrlKey)
 	{
 		BookmarkHelper::OpenBookmarkItemWithDisposition(bookmarkItem,
-			m_navigator->DetermineOpenDisposition(false, event.ctrlKey, event.shiftKey),
-			m_coreInterface, m_navigator);
+			DetermineOpenDisposition(false, event.ctrlKey, event.shiftKey), m_coreInterface,
+			m_browserWindow);
 		return;
 	}
 
@@ -302,8 +305,8 @@ void BookmarksToolbar::OnButtonMiddleClicked(const BookmarkItem *bookmarkItem,
 	const MouseEvent &event)
 {
 	BookmarkHelper::OpenBookmarkItemWithDisposition(bookmarkItem,
-		m_navigator->DetermineOpenDisposition(true, event.ctrlKey, event.shiftKey), m_coreInterface,
-		m_navigator);
+		DetermineOpenDisposition(true, event.ctrlKey, event.shiftKey), m_coreInterface,
+		m_browserWindow);
 }
 
 void BookmarksToolbar::OnButtonRightClicked(BookmarkItem *bookmarkItem, const MouseEvent &event)
@@ -350,7 +353,7 @@ void BookmarksToolbar::OnToolbarContextMenuItemSelected(HWND sourceWindow, int m
 		return;
 	}
 
-	assert(m_contextMenuLocation);
+	CHECK(m_contextMenuLocation);
 
 	POINT ptClient = *m_contextMenuLocation;
 	ScreenToClient(m_view->GetHWND(), &ptClient);
@@ -377,8 +380,8 @@ void BookmarksToolbar::OnToolbarContextMenuItemSelected(HWND sourceWindow, int m
 void BookmarksToolbar::OnNewBookmarkItem(BookmarkItem::Type type, size_t targetIndex)
 {
 	BookmarkHelper::AddBookmarkItem(m_bookmarkTree, type,
-		m_bookmarkTree->GetBookmarksToolbarFolder(), targetIndex, m_view->GetHWND(),
-		m_coreInterface);
+		m_bookmarkTree->GetBookmarksToolbarFolder(), targetIndex, m_view->GetHWND(), m_themeManager,
+		m_coreInterface, m_iconResourceLoader);
 }
 
 void BookmarksToolbar::OnPaste(size_t targetIndex)

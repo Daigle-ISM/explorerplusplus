@@ -9,7 +9,7 @@
 #include <set>
 #include <vector>
 
-class WindowSubclassWrapper;
+class WindowSubclass;
 
 struct ShellChangeNotification
 {
@@ -34,7 +34,7 @@ public:
 	ShellChangeWatcher(HWND hwnd, ProcessNotificationsCallback processNotificationsCallback);
 	~ShellChangeWatcher();
 
-	ULONG StartWatching(PCIDLIST_ABSOLUTE pidl, LONG events);
+	ULONG StartWatching(PCIDLIST_ABSOLUTE pidl, LONG events, bool recursive = false);
 	void StopWatching(ULONG changeNotifyId);
 	void StopWatchingAll();
 
@@ -49,7 +49,7 @@ private:
 	void OnProcessShellChangeNotifications();
 
 	HWND m_hwnd;
-	std::vector<std::unique_ptr<WindowSubclassWrapper>> m_windowSubclasses;
+	std::vector<std::unique_ptr<WindowSubclass>> m_windowSubclasses;
 	std::set<ULONG> m_changeNotifyIds;
 	std::vector<ShellChangeNotification> m_shellChangeNotifications;
 	ProcessNotificationsCallback m_processNotificationsCallback;

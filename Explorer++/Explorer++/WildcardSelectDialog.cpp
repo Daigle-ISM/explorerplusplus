@@ -4,13 +4,14 @@
 
 #include "stdafx.h"
 #include "WildcardSelectDialog.h"
-#include "CoreInterface.h"
+#include "BrowserPane.h"
+#include "BrowserWindow.h"
 #include "MainResource.h"
 #include "ResourceHelper.h"
-#include "ShellBrowser/ShellBrowser.h"
+#include "ShellBrowser/ShellBrowserImpl.h"
+#include "TabContainerImpl.h"
 #include "../Helper/BaseDialog.h"
 #include "../Helper/ListViewHelper.h"
-#include "../Helper/Macros.h"
 #include "../Helper/RegistrySettings.h"
 #include "../Helper/WindowHelper.h"
 #include "../Helper/XMLSettings.h"
@@ -20,13 +21,13 @@ const TCHAR WildcardSelectDialogPersistentSettings::SETTINGS_KEY[] = _T("Wildcar
 const TCHAR WildcardSelectDialogPersistentSettings::SETTING_PATTERN_LIST[] = _T("Pattern");
 const TCHAR WildcardSelectDialogPersistentSettings::SETTING_CURRENT_TEXT[] = _T("CurrentText");
 
-WildcardSelectDialog::WildcardSelectDialog(HINSTANCE resourceInstance, HWND hParent, BOOL bSelect,
-	CoreInterface *coreInterface) :
-	ThemedDialog(resourceInstance, IDD_WILDCARDSELECT, hParent, DialogSizingType::Horizontal)
+WildcardSelectDialog::WildcardSelectDialog(HINSTANCE resourceInstance, HWND hParent,
+	ThemeManager *themeManager, BOOL bSelect, BrowserWindow *browserWindow) :
+	ThemedDialog(resourceInstance, IDD_WILDCARDSELECT, hParent, DialogSizingType::Horizontal,
+		themeManager),
+	m_bSelect(bSelect),
+	m_browserWindow(browserWindow)
 {
-	m_bSelect = bSelect;
-	m_coreInterface = coreInterface;
-
 	m_pwsdps = &WildcardSelectDialogPersistentSettings::GetInstance();
 }
 
@@ -89,10 +90,9 @@ INT_PTR WildcardSelectDialog::OnCommand(WPARAM wParam, LPARAM lParam)
 void WildcardSelectDialog::OnOk()
 {
 	TCHAR szPattern[512];
+	GetDlgItemText(m_hDlg, IDC_SELECTGROUP_COMBOBOX, szPattern, std::size(szPattern));
 
-	GetDlgItemText(m_hDlg, IDC_SELECTGROUP_COMBOBOX, szPattern, SIZEOF_ARRAY(szPattern));
-
-	if (lstrcmp(szPattern, EMPTY_STRING) != 0)
+	if (lstrlen(szPattern) != 0)
 	{
 		SelectItems(szPattern);
 
@@ -122,13 +122,14 @@ void WildcardSelectDialog::OnOk()
 
 void WildcardSelectDialog::SelectItems(TCHAR *szPattern)
 {
-	HWND hListView = m_coreInterface->GetActiveListView();
+	const auto &tab = m_browserWindow->GetActivePane()->GetTabContainerImpl()->GetSelectedTab();
+	HWND hListView = tab.GetShellBrowserImpl()->GetListView();
 
 	int nItems = ListView_GetItemCount(hListView);
 
 	for (int i = 0; i < nItems; i++)
 	{
-		std::wstring filename = m_coreInterface->GetActiveShellBrowser()->GetItemName(i);
+		std::wstring filename = tab.GetShellBrowserImpl()->GetItemName(i);
 
 		if (CheckWildcardMatch(szPattern, filename.c_str(), FALSE) == 1)
 		{
@@ -183,8 +184,8 @@ void WildcardSelectDialogPersistentSettings::LoadExtraRegistrySettings(HKEY hKey
 void WildcardSelectDialogPersistentSettings::SaveExtraXMLSettings(IXMLDOMDocument *pXMLDom,
 	IXMLDOMElement *pParentNode)
 {
-	NXMLSettings::AddStringListToNode(pXMLDom, pParentNode, SETTING_PATTERN_LIST, m_PatternList);
-	NXMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_CURRENT_TEXT, m_pattern.c_str());
+	XMLSettings::AddStringListToNode(pXMLDom, pParentNode, SETTING_PATTERN_LIST, m_PatternList);
+	XMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_CURRENT_TEXT, m_pattern.c_str());
 }
 
 void WildcardSelectDialogPersistentSettings::LoadExtraXMLSettings(BSTR bstrName, BSTR bstrValue)

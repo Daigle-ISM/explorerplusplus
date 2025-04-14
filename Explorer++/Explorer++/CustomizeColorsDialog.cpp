@@ -4,31 +4,27 @@
 
 #include "stdafx.h"
 #include "CustomizeColorsDialog.h"
+#include "App.h"
 #include "ColorRuleEditorDialog.h"
 #include "ColorRuleListView.h"
 #include "ColorRuleModel.h"
-#include "CoreInterface.h"
-#include "Explorer++_internal.h"
 #include "IconResourceLoader.h"
 #include "MainResource.h"
 #include "ResourceHelper.h"
 #include "../Helper/Helper.h"
 #include "../Helper/ListViewHelper.h"
-#include "../Helper/Macros.h"
 #include "../Helper/WindowHelper.h"
-#include "../Helper/WindowSubclassWrapper.h"
-
-const TCHAR CustomizeColorsDialogPersistentSettings::SETTINGS_KEY[] = _T("CustomizeColors");
-
-static constexpr COLORREF DEFAULT_INITIAL_COLOR = RGB(0, 94, 138);
+#include "../Helper/WindowSubclass.h"
 
 CustomizeColorsDialog::~CustomizeColorsDialog() = default;
 
 CustomizeColorsDialog::CustomizeColorsDialog(HINSTANCE resourceInstance, HWND parent,
-	CoreInterface *coreInterface, ColorRuleModel *model) :
-	ThemedDialog(resourceInstance, IDD_CUSTOMIZE_COLORS, parent, DialogSizingType::Both),
-	m_coreInterface(coreInterface),
-	m_model(model)
+	ThemeManager *themeManager, ColorRuleModel *model,
+	const IconResourceLoader *iconResourceLoader) :
+	ThemedDialog(resourceInstance, IDD_CUSTOMIZE_COLORS, parent, DialogSizingType::Both,
+		themeManager),
+	m_model(model),
+	m_iconResourceLoader(iconResourceLoader)
 {
 	m_persistentSettings = &CustomizeColorsDialogPersistentSettings::GetInstance();
 }
@@ -36,8 +32,8 @@ CustomizeColorsDialog::CustomizeColorsDialog(HINSTANCE resourceInstance, HWND pa
 INT_PTR CustomizeColorsDialog::OnInitDialog()
 {
 	HWND listView = GetDlgItem(m_hDlg, IDC_LISTVIEW_COLOR_RULES);
-	m_colorRuleListView =
-		std::make_unique<ColorRuleListView>(listView, GetResourceInstance(), m_model);
+	m_colorRuleListView = std::make_unique<ColorRuleListView>(listView, GetResourceInstance(),
+		GetThemeManager(), m_model);
 
 	// This object outlives the ColorRuleListView object, so there's no need to remove these
 	// observers.
@@ -57,8 +53,8 @@ INT_PTR CustomizeColorsDialog::OnInitDialog()
 
 wil::unique_hicon CustomizeColorsDialog::GetDialogIcon(int iconWidth, int iconHeight) const
 {
-	return m_coreInterface->GetIconResourceLoader()->LoadIconFromPNGAndScale(Icon::CustomizeColors,
-		iconWidth, iconHeight);
+	return m_iconResourceLoader->LoadIconFromPNGAndScale(Icon::CustomizeColors, iconWidth,
+		iconHeight);
 }
 
 std::vector<ResizableDialogControl> CustomizeColorsDialog::GetResizableControls()
@@ -135,7 +131,7 @@ void CustomizeColorsDialog::SaveState()
 
 void CustomizeColorsDialog::OnNew()
 {
-	ColorRuleEditorDialog editorDialog(GetResourceInstance(), m_hDlg, m_model,
+	ColorRuleEditorDialog editorDialog(GetResourceInstance(), m_hDlg, GetThemeManager(), m_model,
 		ColorRuleEditorDialog::EditDetails::AddNewColorRule(
 			std::make_unique<ColorRule>(L"", L"", false, 0, DEFAULT_INITIAL_COLOR)));
 	editorDialog.ShowModalDialog();
@@ -150,7 +146,7 @@ void CustomizeColorsDialog::OnEdit()
 		return;
 	}
 
-	ColorRuleEditorDialog editorDialog(GetResourceInstance(), m_hDlg, m_model,
+	ColorRuleEditorDialog editorDialog(GetResourceInstance(), m_hDlg, GetThemeManager(), m_model,
 		ColorRuleEditorDialog::EditDetails::EditColorRule(selectedColorRule));
 	editorDialog.ShowModalDialog();
 }
@@ -200,7 +196,7 @@ void CustomizeColorsDialog::OnDelete()
 
 	std::wstring deleteMessage =
 		ResourceHelper::LoadString(GetResourceInstance(), IDS_COLOR_RULE_DELETE);
-	int confirmResult = MessageBox(m_hDlg, deleteMessage.c_str(), NExplorerplusplus::APP_NAME,
+	int confirmResult = MessageBox(m_hDlg, deleteMessage.c_str(), App::APP_NAME,
 		MB_YESNO | MB_ICONINFORMATION | MB_DEFBUTTON2);
 
 	if (confirmResult != IDYES)
@@ -217,7 +213,7 @@ void CustomizeColorsDialog::OnDeleteAll()
 {
 	std::wstring deleteAllMessage =
 		ResourceHelper::LoadString(GetResourceInstance(), IDS_COLOR_RULE_DELETE_ALL);
-	int confirmResult = MessageBox(m_hDlg, deleteAllMessage.c_str(), NExplorerplusplus::APP_NAME,
+	int confirmResult = MessageBox(m_hDlg, deleteAllMessage.c_str(), App::APP_NAME,
 		MB_YESNO | MB_ICONINFORMATION | MB_DEFBUTTON2);
 
 	if (confirmResult != IDYES)

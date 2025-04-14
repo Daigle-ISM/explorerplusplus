@@ -14,22 +14,20 @@
 #include "ServiceProvider.h"
 #include "SetFileAttributesDialog.h"
 #include "ShellBrowser/Columns.h"
-#include "ShellBrowser/ShellBrowser.h"
+#include "ShellBrowser/ShellBrowserImpl.h"
 #include "ShellBrowser/ShellNavigationController.h"
 #include "ShellBrowser/ViewModes.h"
 #include "ShellView.h"
 #include "SortMenuBuilder.h"
-#include "TabContainer.h"
+#include "TabContainerImpl.h"
 #include "ViewModeHelper.h"
 #include "../Helper/BulkClipboardWriter.h"
 #include "../Helper/ClipboardHelper.h"
-#include "../Helper/ContextMenuManager.h"
 #include "../Helper/DropHandler.h"
-#include "../Helper/FileContextMenuManager.h"
 #include "../Helper/Helper.h"
 #include "../Helper/ListViewHelper.h"
-#include "../Helper/Macros.h"
 #include "../Helper/MenuHelper.h"
+#include "../Helper/ShellContextMenu.h"
 #include "../Helper/ShellHelper.h"
 #include "../Helper/WinRTBaseWrapper.h"
 #include <wil/com.h>
@@ -60,10 +58,10 @@ LRESULT CALLBACK Explorerplusplus::ListViewSubclassProc(HWND ListView, UINT msg,
 	case WM_CONTEXTMENU:
 		if (reinterpret_cast<HWND>(wParam)
 			== GetActivePane()
-				   ->GetTabContainer()
-				   ->GetSelectedTab()
-				   .GetShellBrowser()
-				   ->GetListView())
+				->GetTabContainerImpl()
+				->GetSelectedTab()
+				.GetShellBrowserImpl()
+				->GetListView())
 		{
 			OnShowListViewContextMenu({ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) });
 			return 0;
@@ -95,7 +93,7 @@ LRESULT CALLBACK Explorerplusplus::ListViewSubclassProc(HWND ListView, UINT msg,
 			auto itr = currentColumns.begin();
 			while (i < (pnmHeader->iItem + 1) && itr != currentColumns.end())
 			{
-				if (itr->bChecked)
+				if (itr->checked)
 				{
 					i++;
 				}
@@ -113,7 +111,7 @@ LRESULT CALLBACK Explorerplusplus::ListViewSubclassProc(HWND ListView, UINT msg,
 			itr = currentColumns.begin();
 			while (i < (pnmHeader->pitem->iOrder + 1) && itr != currentColumns.end())
 			{
-				if (itr->bChecked)
+				if (itr->checked)
 				{
 					i++;
 				}
@@ -128,8 +126,8 @@ LRESULT CALLBACK Explorerplusplus::ListViewSubclassProc(HWND ListView, UINT msg,
 
 			m_pActiveShellBrowser->SetCurrentColumns(currentColumns);
 
-			Tab &tab = GetActivePane()->GetTabContainer()->GetSelectedTab();
-			tab.GetShellBrowser()->GetNavigationController()->Refresh();
+			Tab &tab = GetActivePane()->GetTabContainerImpl()->GetSelectedTab();
+			tab.GetShellBrowserImpl()->GetNavigationController()->Refresh();
 
 			return TRUE;
 		}
@@ -164,6 +162,13 @@ LRESULT Explorerplusplus::OnListViewKeyDown(LPARAM lParam)
 			OnListViewPaste();
 		}
 		break;
+
+	case VK_INSERT:
+		if (!IsKeyDown(VK_CONTROL) && IsKeyDown(VK_SHIFT) && !IsKeyDown(VK_MENU))
+		{
+			OnListViewPaste();
+		}
+		break;
 	}
 
 	return 0;
@@ -171,9 +176,9 @@ LRESULT Explorerplusplus::OnListViewKeyDown(LPARAM lParam)
 
 int Explorerplusplus::DetermineListViewObjectIndex(HWND hListView)
 {
-	for (auto &item : GetActivePane()->GetTabContainer()->GetAllTabs())
+	for (auto &item : GetActivePane()->GetTabContainerImpl()->GetAllTabs())
 	{
-		if (item.second->GetShellBrowser()->GetListView() == hListView)
+		if (item.second->GetShellBrowserImpl()->GetListView() == hListView)
 		{
 			return item.first;
 		}
@@ -193,14 +198,14 @@ void Explorerplusplus::OnShowListViewContextMenu(const POINT &ptScreen)
 		keyboardGenerated = true;
 	}
 
-	Tab &tab = GetActivePane()->GetTabContainer()->GetSelectedTab();
+	Tab &tab = GetActivePane()->GetTabContainerImpl()->GetSelectedTab();
 
-	if (ListView_GetSelectedCount(tab.GetShellBrowser()->GetListView()) == 0)
+	if (ListView_GetSelectedCount(tab.GetShellBrowserImpl()->GetListView()) == 0)
 	{
 		if (keyboardGenerated)
 		{
 			finalPoint = { 0, 0 };
-			ClientToScreen(tab.GetShellBrowser()->GetListView(), &finalPoint);
+			ClientToScreen(tab.GetShellBrowserImpl()->GetListView(), &finalPoint);
 		}
 
 		OnListViewBackgroundRClick(&finalPoint);
@@ -209,23 +214,23 @@ void Explorerplusplus::OnShowListViewContextMenu(const POINT &ptScreen)
 	{
 		if (keyboardGenerated)
 		{
-			int targetItem = ListView_GetNextItem(tab.GetShellBrowser()->GetListView(), -1,
+			int targetItem = ListView_GetNextItem(tab.GetShellBrowserImpl()->GetListView(), -1,
 				LVNI_FOCUSED | LVNI_SELECTED);
 
 			if (targetItem == -1)
 			{
-				auto lastSelectedItem =
-					ListViewHelper::GetLastSelectedItemIndex(tab.GetShellBrowser()->GetListView());
+				auto lastSelectedItem = ListViewHelper::GetLastSelectedItemIndex(
+					tab.GetShellBrowserImpl()->GetListView());
 				targetItem = lastSelectedItem.value();
 			}
 
 			RECT itemRect;
-			ListView_GetItemRect(tab.GetShellBrowser()->GetListView(), targetItem, &itemRect,
+			ListView_GetItemRect(tab.GetShellBrowserImpl()->GetListView(), targetItem, &itemRect,
 				LVIR_ICON);
 
 			finalPoint = { itemRect.left + (itemRect.right - itemRect.left) / 2,
 				itemRect.top + (itemRect.bottom - itemRect.top) / 2 };
-			ClientToScreen(tab.GetShellBrowser()->GetListView(), &finalPoint);
+			ClientToScreen(tab.GetShellBrowserImpl()->GetListView(), &finalPoint);
 		}
 
 		OnListViewItemRClick(&finalPoint);
@@ -234,110 +239,33 @@ void Explorerplusplus::OnShowListViewContextMenu(const POINT &ptScreen)
 
 void Explorerplusplus::OnListViewBackgroundRClick(POINT *pCursorPos)
 {
-	if (IsWindows8OrGreater())
-	{
-		OnListViewBackgroundRClickWindows8OrGreater(pCursorPos);
-	}
-	else
-	{
-		OnListViewBackgroundRClickWindows7(pCursorPos);
-	}
-}
+	const auto &selectedTab = GetActivePane()->GetTabContainerImpl()->GetSelectedTab();
+	auto pidlDirectory = selectedTab.GetShellBrowserImpl()->GetDirectoryIdl();
 
-void Explorerplusplus::OnListViewBackgroundRClickWindows8OrGreater(POINT *pCursorPos)
-{
-	const auto &selectedTab = GetActivePane()->GetTabContainer()->GetSelectedTab();
-	auto pidlDirectory = selectedTab.GetShellBrowser()->GetDirectoryIdl();
-
-	FileContextMenuManager fcmm(selectedTab.GetShellBrowser()->GetListView(), pidlDirectory.get(),
-		{});
-
-	FileContextMenuInfo fcmi;
-	fcmi.uFrom = FROM_LISTVIEW;
+	ShellContextMenu shellContextMenu(pidlDirectory.get(), {}, this, m_pStatusBar);
 
 	auto serviceProvider = winrt::make_self<ServiceProvider>();
 
-	auto newMenuClient = winrt::make<NewMenuClient>(selectedTab.GetShellBrowser());
+	auto newMenuClient = winrt::make<NewMenuClient>(selectedTab.GetShellBrowserImpl());
 	serviceProvider->RegisterService(IID_INewMenuClient, newMenuClient.get());
 
 	winrt::com_ptr<IFolderView2> folderView =
-		winrt::make<FolderView>(selectedTab.GetShellBrowserWeak());
+		winrt::make<FolderView>(selectedTab.GetShellBrowserImpl()->GetWeakPtr());
 	serviceProvider->RegisterService(IID_IFolderView, folderView.get());
 
-	auto shellView = winrt::make<ShellView>(selectedTab.GetShellBrowserWeak(), this, false);
+	auto shellView =
+		winrt::make<ShellView>(selectedTab.GetShellBrowserImpl()->GetWeakPtr(), this, false);
 	serviceProvider->RegisterService(SID_DefView, shellView.get());
 
-	fcmm.ShowMenu(this, MIN_SHELL_MENU_ID, MAX_SHELL_MENU_ID, pCursorPos, m_pStatusBar,
-		serviceProvider.get(), reinterpret_cast<DWORD_PTR>(&fcmi), FALSE, IsKeyDown(VK_SHIFT));
-}
+	ShellContextMenu::Flags flags = ShellContextMenu::Flags::Standard;
 
-void Explorerplusplus::OnListViewBackgroundRClickWindows7(POINT *pCursorPos)
-{
-	auto parentMenu = InitializeRightClickMenu();
-	HMENU menu = GetSubMenu(parentMenu.get(), 0);
-
-	const auto &selectedTab = GetActivePane()->GetTabContainer()->GetSelectedTab();
-	auto pidlDirectory = selectedTab.GetShellBrowser()->GetDirectoryIdl();
-
-	unique_pidl_absolute pidlParent(ILCloneFull(pidlDirectory.get()));
-	ILRemoveLastID(pidlParent.get());
-
-	wil::com_ptr_nothrow<IShellFolder> pShellFolder;
-	HRESULT hr = BindToIdl(pidlParent.get(), IID_PPV_ARGS(&pShellFolder));
-
-	if (FAILED(hr))
+	if (IsKeyDown(VK_SHIFT))
 	{
-		return;
+		WI_SetFlag(flags, ShellContextMenu::Flags::ExtendedVerbs);
 	}
 
-	wil::com_ptr_nothrow<IDataObject> pDataObject;
-	PCUITEMID_CHILD pidlChildFolder = ILFindLastID(pidlDirectory.get());
-	hr =
-		GetUIObjectOf(pShellFolder.get(), nullptr, 1, &pidlChildFolder, IID_PPV_ARGS(&pDataObject));
-
-	if (FAILED(hr))
-	{
-		return;
-	}
-
-	auto serviceProvider = winrt::make_self<ServiceProvider>();
-
-	auto newMenuClient = winrt::make<NewMenuClient>(selectedTab.GetShellBrowser());
-	serviceProvider->RegisterService(IID_INewMenuClient, newMenuClient.get());
-
-	ContextMenuManager cmm(ContextMenuManager::ContextMenuType::Background, pidlDirectory.get(),
-		pDataObject.get(), serviceProvider.get(), BLACKLISTED_BACKGROUND_MENU_CLSID_ENTRIES);
-
-	cmm.ShowMenu(m_hContainer, menu, IDM_FILE_COPYFOLDERPATH, MIN_SHELL_MENU_ID, MAX_SHELL_MENU_ID,
-		*pCursorPos, *m_pStatusBar);
-}
-
-wil::unique_hmenu Explorerplusplus::InitializeRightClickMenu()
-{
-	wil::unique_hmenu parentMenu(
-		LoadMenu(m_resourceInstance, MAKEINTRESOURCE(IDR_MAINMENU_RCLICK)));
-
-	MenuHelper::AttachSubMenu(parentMenu.get(), BuildViewsMenu(), IDM_POPUP_VIEW, FALSE);
-
-	SortMenuBuilder sortMenuBuilder(m_resourceInstance);
-	auto [sortByMenu, groupByMenu] =
-		sortMenuBuilder.BuildMenus(GetActivePane()->GetTabContainer()->GetSelectedTab());
-
-	MenuHelper::AttachSubMenu(parentMenu.get(), std::move(sortByMenu), IDM_POPUP_SORTBY, FALSE);
-	MenuHelper::AttachSubMenu(parentMenu.get(), std::move(groupByMenu), IDM_POPUP_GROUPBY, FALSE);
-
-	ViewMode viewMode = m_pActiveShellBrowser->GetViewMode();
-
-	if (viewMode == +ViewMode::List)
-	{
-		MenuHelper::EnableItem(parentMenu.get(), IDM_POPUP_GROUPBY, FALSE);
-	}
-	else
-	{
-		MenuHelper::EnableItem(parentMenu.get(), IDM_POPUP_GROUPBY, TRUE);
-	}
-
-	return parentMenu;
+	shellContextMenu.ShowMenu(selectedTab.GetShellBrowserImpl()->GetListView(), pCursorPos,
+		serviceProvider.get(), flags);
 }
 
 void Explorerplusplus::OnListViewItemRClick(POINT *pCursorPos)
@@ -360,14 +288,36 @@ void Explorerplusplus::OnListViewItemRClick(POINT *pCursorPos)
 
 		auto pidlDirectory = m_pActiveShellBrowser->GetDirectoryIdl();
 
-		FileContextMenuManager fcmm(m_hActiveListView, pidlDirectory.get(), pidlItems);
+		ShellContextMenu::Flags flags = ShellContextMenu::Flags::Rename;
 
-		FileContextMenuInfo fcmi;
-		fcmi.uFrom = FROM_LISTVIEW;
+		if (IsKeyDown(VK_SHIFT))
+		{
+			WI_SetFlag(flags, ShellContextMenu::Flags::ExtendedVerbs);
+		}
 
-		fcmm.ShowMenu(this, MIN_SHELL_MENU_ID, MAX_SHELL_MENU_ID, pCursorPos, m_pStatusBar, nullptr,
-			reinterpret_cast<DWORD_PTR>(&fcmi), TRUE, IsKeyDown(VK_SHIFT));
+		ShellContextMenu shellContextMenu(pidlDirectory.get(), pidlItems, this, m_pStatusBar);
+		shellContextMenu.ShowMenu(m_hActiveListView, pCursorPos, nullptr, flags);
 	}
+}
+
+void Explorerplusplus::OnListViewClick(const NMITEMACTIVATE *eventInfo)
+{
+	if (!m_config->globalFolderSettings.oneClickActivate.get())
+	{
+		return;
+	}
+
+	LVHITTESTINFO htInfo = {};
+	htInfo.pt = eventInfo->ptAction;
+	ListView_HitTest(m_hActiveListView, &htInfo);
+
+	if (WI_IsFlagSet(htInfo.flags, LVHT_ONITEMSTATEICON) && m_config->checkBoxSelection.get())
+	{
+		// In this case, the click was on the checkbox, so it should be ignored.
+		return;
+	}
+
+	OnListViewDoubleClick(eventInfo);
 }
 
 void Explorerplusplus::OnListViewDoubleClick(const NMITEMACTIVATE *eventInfo)
@@ -435,7 +385,7 @@ void Explorerplusplus::OnListViewCopyUniversalPaths() const
 
 		TCHAR szBuffer[1024];
 
-		DWORD dwBufferSize = SIZEOF_ARRAY(szBuffer);
+		DWORD dwBufferSize = std::size(szBuffer);
 		auto *puni = reinterpret_cast<UNIVERSAL_NAME_INFO *>(&szBuffer);
 		DWORD dwRet = WNetGetUniversalName(fullFilename.c_str(), UNIVERSAL_NAME_INFO_LEVEL,
 			reinterpret_cast<LPVOID>(puni), &dwBufferSize);
@@ -458,8 +408,8 @@ void Explorerplusplus::OnListViewCopyUniversalPaths() const
 
 void Explorerplusplus::OnListViewSetFileAttributes() const
 {
-	const Tab &selectedTab = GetActivePane()->GetTabContainer()->GetSelectedTab();
-	selectedTab.GetShellBrowser()->SetFileAttributesForSelection();
+	const Tab &selectedTab = GetActivePane()->GetTabContainerImpl()->GetSelectedTab();
+	selectedTab.GetShellBrowserImpl()->SetFileAttributesForSelection();
 }
 
 void Explorerplusplus::OnListViewPaste()
@@ -472,19 +422,18 @@ void Explorerplusplus::OnListViewPaste()
 		return;
 	}
 
-	const auto &selectedTab = GetActivePane()->GetTabContainer()->GetSelectedTab();
-	auto directory = selectedTab.GetShellBrowser()->GetDirectoryIdl();
+	const auto &selectedTab = GetActivePane()->GetTabContainerImpl()->GetSelectedTab();
+	auto directory = selectedTab.GetShellBrowserImpl()->GetDirectoryIdl();
 
-	if (CanShellPasteDataObject(directory.get(), clipboardObject.get(),
-			DROPEFFECT_COPY | DROPEFFECT_MOVE))
+	if (CanShellPasteDataObject(directory.get(), clipboardObject.get(), PasteType::Normal))
 	{
 		auto serviceProvider = winrt::make_self<ServiceProvider>();
 
-		auto folderView = winrt::make<FolderView>(selectedTab.GetShellBrowserWeak());
+		auto folderView = winrt::make<FolderView>(selectedTab.GetShellBrowserImpl()->GetWeakPtr());
 		serviceProvider->RegisterService(IID_IFolderView, folderView.get());
 
 		ExecuteActionFromContextMenu(directory.get(), {},
-			selectedTab.GetShellBrowser()->GetListView(), L"paste", 0, serviceProvider.get());
+			selectedTab.GetShellBrowserImpl()->GetListView(), L"paste", 0, serviceProvider.get());
 	}
 	else
 	{
@@ -494,8 +443,8 @@ void Explorerplusplus::OnListViewPaste()
 		 Files are copied asynchronously, so a change of directory
 		 will cause the destination directory to change in the
 		 middle of the copy operation. */
-		StringCchCopy(szDestination, SIZEOF_ARRAY(szDestination),
-			selectedTab.GetShellBrowser()->GetDirectory().c_str());
+		StringCchCopy(szDestination, std::size(szDestination),
+			selectedTab.GetShellBrowserImpl()->GetDirectory().c_str());
 
 		/* Also, the string must be double NULL terminated. */
 		szDestination[lstrlen(szDestination) + 1] = '\0';
@@ -533,12 +482,12 @@ int Explorerplusplus::HighlightSimilarFiles(HWND ListView) const
 
 		if (bSimilarTypes)
 		{
-			ListViewHelper::SelectItem(ListView, i, TRUE);
+			ListViewHelper::SelectItem(ListView, i, true);
 			nSimilar++;
 		}
 		else
 		{
-			ListViewHelper::SelectItem(ListView, i, FALSE);
+			ListViewHelper::SelectItem(ListView, i, false);
 		}
 	}
 

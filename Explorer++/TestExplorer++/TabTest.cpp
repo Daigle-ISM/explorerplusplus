@@ -4,60 +4,128 @@
 
 #include "pch.h"
 #include "Tab.h"
+#include "BrowserWindowMock.h"
+#include "ShellBrowser/NavigationEvents.h"
+#include "ShellBrowser/ShellNavigationController.h"
+#include "ShellBrowserFake.h"
+#include "ShellTestHelper.h"
+#include "TabEvents.h"
+#include "TabNavigationMock.h"
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 using namespace testing;
 
-class TabObserverMock
-{
-public:
-	TabObserverMock(Tab *tab)
-	{
-		tab->AddTabUpdatedObserver(std::bind_front(&TabObserverMock::OnTabUpdated, this));
-	}
-
-	MOCK_METHOD(void, OnTabUpdated, (const Tab &tab, Tab::PropertyType propertyType));
-};
-
 class TabTest : public Test
 {
 protected:
-	TabTest() : m_tab(nullptr), m_observer(&m_tab)
+	Tab BuildTab(const Tab::InitialData &initialData = {})
 	{
+		return Tab(std::make_unique<ShellBrowserFake>(&m_navigationEvents, &m_tabNavigation),
+			&m_browser, nullptr, &m_tabEvents, initialData);
 	}
 
-	Tab m_tab;
-	TabObserverMock m_observer;
+	NavigationEvents m_navigationEvents;
+	TabNavigationMock m_tabNavigation;
+	BrowserWindowMock m_browser;
+	TabEvents m_tabEvents;
 };
+
+TEST_F(TabTest, InitialData)
+{
+	Tab::InitialData initialData;
+	initialData.useCustomName = true;
+	initialData.customName = L"Custom tab name";
+	initialData.lockState = Tab::LockState::AddressLocked;
+
+	auto tab = BuildTab(initialData);
+	EXPECT_EQ(tab.GetUseCustomName(), initialData.useCustomName);
+	EXPECT_EQ(tab.GetName(), initialData.customName);
+	EXPECT_EQ(tab.GetLockState(), initialData.lockState);
+}
 
 TEST_F(TabTest, CustomName)
 {
-	EXPECT_FALSE(m_tab.GetUseCustomName());
+	auto tab = BuildTab();
+
+	std::wstring folderName = L"fake";
+	PidlAbsolute pidl = CreateSimplePidlForTest(L"c:\\" + folderName);
+	auto navigateParams = NavigateParams::Normal(pidl.Raw());
+	tab.GetShellBrowser()->GetNavigationController()->Navigate(navigateParams);
+
+	EXPECT_FALSE(tab.GetUseCustomName());
+	EXPECT_EQ(tab.GetName(), folderName);
 
 	std::wstring customName = L"Name";
-	m_tab.SetCustomName(customName);
-	EXPECT_TRUE(m_tab.GetUseCustomName());
-	EXPECT_EQ(m_tab.GetName(), customName);
+	tab.SetCustomName(customName);
+	EXPECT_TRUE(tab.GetUseCustomName());
+	EXPECT_EQ(tab.GetName(), customName);
 
-	m_tab.ClearCustomName();
-	EXPECT_FALSE(m_tab.GetUseCustomName());
+	tab.ClearCustomName();
+	EXPECT_FALSE(tab.GetUseCustomName());
+	EXPECT_EQ(tab.GetName(), folderName);
+}
+
+TEST_F(TabTest, EmptyName)
+{
+	auto tab = BuildTab();
+
+	std::wstring folderName = L"fake";
+	PidlAbsolute pidl = CreateSimplePidlForTest(L"c:\\" + folderName);
+	auto navigateParams = NavigateParams::Normal(pidl.Raw());
+	tab.GetShellBrowser()->GetNavigationController()->Navigate(navigateParams);
+
+	// An empty string isn't counted as a valid name and should be ignored.
+	tab.SetCustomName(L"");
+	EXPECT_FALSE(tab.GetUseCustomName());
+	EXPECT_EQ(tab.GetName(), folderName);
+}
+
+TEST_F(TabTest, LockState)
+{
+	auto tab = BuildTab();
+
+	EXPECT_EQ(tab.GetLockState(), Tab::LockState::NotLocked);
+	EXPECT_FALSE(tab.IsLocked());
+	EXPECT_EQ(tab.GetShellBrowser()->GetNavigationController()->GetNavigationTargetMode(),
+		NavigationTargetMode::Normal);
+
+	tab.SetLockState(Tab::LockState::Locked);
+	EXPECT_EQ(tab.GetLockState(), Tab::LockState::Locked);
+	EXPECT_TRUE(tab.IsLocked());
+	EXPECT_EQ(tab.GetShellBrowser()->GetNavigationController()->GetNavigationTargetMode(),
+		NavigationTargetMode::Normal);
+
+	tab.SetLockState(Tab::LockState::AddressLocked);
+	EXPECT_EQ(tab.GetLockState(), Tab::LockState::AddressLocked);
+	EXPECT_TRUE(tab.IsLocked());
+	EXPECT_EQ(tab.GetShellBrowser()->GetNavigationController()->GetNavigationTargetMode(),
+		NavigationTargetMode::ForceNewTab);
 }
 
 TEST_F(TabTest, Update)
 {
-	EXPECT_CALL(m_observer, OnTabUpdated(Ref(m_tab), Tab::PropertyType::Name));
-	m_tab.SetCustomName(L"Name");
+	auto tab = BuildTab();
 
-	EXPECT_CALL(m_observer, OnTabUpdated(Ref(m_tab), Tab::PropertyType::Name));
-	m_tab.ClearCustomName();
+	MockFunction<void(const Tab &tab, Tab::PropertyType propertyType)> tabUpdatedCallback;
+	m_tabEvents.AddUpdatedObserver(tabUpdatedCallback.AsStdFunction(), TabEventScope::Global());
 
-	EXPECT_CALL(m_observer, OnTabUpdated(Ref(m_tab), Tab::PropertyType::LockState));
-	m_tab.SetLockState(Tab::LockState::Locked);
+	InSequence seq;
 
-	EXPECT_CALL(m_observer, OnTabUpdated(Ref(m_tab), Tab::PropertyType::LockState));
-	m_tab.SetLockState(Tab::LockState::AddressLocked);
+	EXPECT_CALL(tabUpdatedCallback, Call(Ref(tab), Tab::PropertyType::Name)).Times(2);
+	EXPECT_CALL(tabUpdatedCallback, Call(Ref(tab), Tab::PropertyType::LockState)).Times(3);
 
-	EXPECT_CALL(m_observer, OnTabUpdated(Ref(m_tab), Tab::PropertyType::LockState));
-	m_tab.SetLockState(Tab::LockState::NotLocked);
+	tab.SetCustomName(L"Name");
+	tab.ClearCustomName();
+
+	tab.SetLockState(Tab::LockState::Locked);
+	tab.SetLockState(Tab::LockState::AddressLocked);
+	tab.SetLockState(Tab::LockState::NotLocked);
+}
+
+TEST_F(TabTest, GetBrowser)
+{
+	auto tab = BuildTab();
+
+	EXPECT_EQ(tab.GetBrowser(), &m_browser);
 }

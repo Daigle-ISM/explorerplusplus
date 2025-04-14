@@ -9,8 +9,7 @@
 
 #include "stdafx.h"
 #include "HolderWindow.h"
-#include "CoreInterface.h"
-#include "DarkModeHelper.h"
+#include "DarkModeManager.h"
 #include "MainFontSetter.h"
 #include "SystemFontHelper.h"
 #include "ToolbarHelper.h"
@@ -18,14 +17,18 @@
 #include "../Helper/WindowHelper.h"
 
 HolderWindow *HolderWindow::Create(HWND parent, const std::wstring &caption, DWORD style,
-	const std::wstring &closeButtonTooltip, CoreInterface *coreInterface)
+	const std::wstring &closeButtonTooltip, const Config *config,
+	const IconResourceLoader *iconResourceLoader, const DarkModeManager *darkModeManager)
 {
-	return new HolderWindow(parent, caption, style, closeButtonTooltip, coreInterface);
+	return new HolderWindow(parent, caption, style, closeButtonTooltip, config, iconResourceLoader,
+		darkModeManager);
 }
 
 HolderWindow::HolderWindow(HWND parent, const std::wstring &caption, DWORD style,
-	const std::wstring &closeButtonTooltip, CoreInterface *coreInterface) :
+	const std::wstring &closeButtonTooltip, const Config *config,
+	const IconResourceLoader *iconResourceLoader, const DarkModeManager *darkModeManager) :
 	m_hwnd(CreateHolderWindow(parent, caption, style)),
+	m_darkModeManager(darkModeManager),
 	m_sizingCursor(LoadCursor(nullptr, IDC_SIZEWE))
 {
 	LOGFONT systemFont = GetDefaultSystemFontScaledToWindow(m_hwnd);
@@ -35,7 +38,7 @@ HolderWindow::HolderWindow(HWND parent, const std::wstring &caption, DWORD style
 	m_font = m_defaultFont.get();
 
 	std::tie(m_toolbar, m_toolbarImageList) = ToolbarHelper::CreateCloseButtonToolbar(m_hwnd,
-		CLOSE_BUTTON_ID, closeButtonTooltip, coreInterface->GetIconResourceLoader());
+		CLOSE_BUTTON_ID, closeButtonTooltip, iconResourceLoader);
 
 	SIZE toolbarSize;
 	[[maybe_unused]] auto sizeRes =
@@ -45,10 +48,9 @@ HolderWindow::HolderWindow(HWND parent, const std::wstring &caption, DWORD style
 		SWP_NOZORDER | SWP_NOMOVE);
 
 	m_tooltipFontSetter = std::make_unique<MainFontSetter>(
-		reinterpret_cast<HWND>(SendMessage(m_toolbar, TB_GETTOOLTIPS, 0, 0)),
-		coreInterface->GetConfig());
+		reinterpret_cast<HWND>(SendMessage(m_toolbar, TB_GETTOOLTIPS, 0, 0)), config);
 
-	m_fontSetter = std::make_unique<MainFontSetter>(m_hwnd, coreInterface->GetConfig());
+	m_fontSetter = std::make_unique<MainFontSetter>(m_hwnd, config);
 
 	m_initialized = true;
 }
@@ -215,12 +217,11 @@ void HolderWindow::OnPrintClient(HDC hdc)
 
 void HolderWindow::PerformPaint(const PAINTSTRUCT &ps)
 {
-	auto &darkModeHelper = DarkModeHelper::GetInstance();
 	HBRUSH backgroundBrush;
 
-	if (darkModeHelper.IsDarkModeEnabled())
+	if (m_darkModeManager->IsDarkModeEnabled())
 	{
-		backgroundBrush = darkModeHelper.GetBackgroundBrush();
+		backgroundBrush = m_darkModeManager->GetBackgroundBrush();
 	}
 	else
 	{
@@ -233,9 +234,9 @@ void HolderWindow::PerformPaint(const PAINTSTRUCT &ps)
 	auto selectFont = wil::SelectObject(ps.hdc, m_font);
 	SetBkMode(ps.hdc, TRANSPARENT);
 
-	if (darkModeHelper.IsDarkModeEnabled())
+	if (m_darkModeManager->IsDarkModeEnabled())
 	{
-		SetTextColor(ps.hdc, DarkModeHelper::TEXT_COLOR);
+		SetTextColor(ps.hdc, DarkModeManager::TEXT_COLOR);
 	}
 
 	RECT toolbarRect;
@@ -318,7 +319,7 @@ int HolderWindow::CalculateCaptionSectionHeight()
 
 	auto verticalPadding =
 		DpiCompatibility::GetInstance().ScaleValue(m_hwnd, CAPTION_SECTION_VERTICAL_PADDING);
-	return (std::max)(textSize.cy, rc.bottom) + (verticalPadding * 2);
+	return std::max(textSize.cy, rc.bottom) + (verticalPadding * 2);
 }
 
 void HolderWindow::OnLButtonDown(const POINT &pt)
@@ -350,7 +351,7 @@ int HolderWindow::OnMouseMove(const POINT &pt)
 		RECT clientRect;
 		GetClientRect(m_hwnd, &clientRect);
 
-		int newWidth = (std::max)(pt.x + m_resizeDistanceToEdge.value(), 0L);
+		int newWidth = std::max(pt.x + m_resizeDistanceToEdge.value(), 0L);
 
 		if (m_resizedCallback)
 		{

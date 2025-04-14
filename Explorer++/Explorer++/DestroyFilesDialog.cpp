@@ -4,10 +4,10 @@
 
 #include "stdafx.h"
 #include "DestroyFilesDialog.h"
-#include "Explorer++_internal.h"
+#include "App.h"
 #include "MainResource.h"
+#include "ResourceHelper.h"
 #include "../Helper/Helper.h"
-#include "../Helper/Macros.h"
 #include "../Helper/RegistrySettings.h"
 #include "../Helper/StringHelper.h"
 #include "../Helper/XMLSettings.h"
@@ -18,8 +18,9 @@ const TCHAR DestroyFilesDialogPersistentSettings::SETTING_OVERWRITE_METHOD[] =
 	_T("OverwriteMethod");
 
 DestroyFilesDialog::DestroyFilesDialog(HINSTANCE resourceInstance, HWND hParent,
-	const std::list<std::wstring> &FullFilenameList, BOOL bShowFriendlyDates) :
-	ThemedDialog(resourceInstance, IDD_DESTROYFILES, hParent, DialogSizingType::Both)
+	ThemeManager *themeManager, const std::list<std::wstring> &FullFilenameList,
+	BOOL bShowFriendlyDates) :
+	ThemedDialog(resourceInstance, IDD_DESTROYFILES, hParent, DialogSizingType::Both, themeManager)
 {
 	m_FullFilenameList = FullFilenameList;
 	m_bShowFriendlyDates = bShowFriendlyDates;
@@ -43,27 +44,29 @@ INT_PTR DestroyFilesDialog::OnInitDialog()
 		LVS_EX_DOUBLEBUFFER | LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
 
 	LVCOLUMN lvColumn;
-	TCHAR szTemp[128];
 
-	LoadString(GetResourceInstance(), IDS_DESTROY_FILES_COLUMN_FILE, szTemp, SIZEOF_ARRAY(szTemp));
+	auto fileText =
+		ResourceHelper::LoadString(GetResourceInstance(), IDS_DESTROY_FILES_COLUMN_FILE);
 	lvColumn.mask = LVCF_TEXT;
-	lvColumn.pszText = szTemp;
+	lvColumn.pszText = fileText.data();
 	ListView_InsertColumn(hListView, 0, &lvColumn);
 
-	LoadString(GetResourceInstance(), IDS_DESTROY_FILES_COLUMN_TYPE, szTemp, SIZEOF_ARRAY(szTemp));
+	auto typeText =
+		ResourceHelper::LoadString(GetResourceInstance(), IDS_DESTROY_FILES_COLUMN_TYPE);
 	lvColumn.mask = LVCF_TEXT;
-	lvColumn.pszText = szTemp;
+	lvColumn.pszText = typeText.data();
 	ListView_InsertColumn(hListView, 1, &lvColumn);
 
-	LoadString(GetResourceInstance(), IDS_DESTROY_FILES_COLUMN_SIZE, szTemp, SIZEOF_ARRAY(szTemp));
+	auto sizeText =
+		ResourceHelper::LoadString(GetResourceInstance(), IDS_DESTROY_FILES_COLUMN_SIZE);
 	lvColumn.mask = LVCF_TEXT;
-	lvColumn.pszText = szTemp;
+	lvColumn.pszText = sizeText.data();
 	ListView_InsertColumn(hListView, 2, &lvColumn);
 
-	LoadString(GetResourceInstance(), IDS_DESTROY_FILES_COLUMN_DATE_MODIFIED, szTemp,
-		SIZEOF_ARRAY(szTemp));
+	auto dateModifiedText =
+		ResourceHelper::LoadString(GetResourceInstance(), IDS_DESTROY_FILES_COLUMN_DATE_MODIFIED);
 	lvColumn.mask = LVCF_TEXT;
-	lvColumn.pszText = szTemp;
+	lvColumn.pszText = dateModifiedText.data();
 	ListView_InsertColumn(hListView, 3, &lvColumn);
 
 	int iItem = 0;
@@ -72,7 +75,7 @@ INT_PTR DestroyFilesDialog::OnInitDialog()
 	{
 		TCHAR szFullFilename[MAX_PATH];
 
-		StringCchCopy(szFullFilename, SIZEOF_ARRAY(szFullFilename), strFullFilename.c_str());
+		StringCchCopy(szFullFilename, std::size(szFullFilename), strFullFilename.c_str());
 
 		/* TODO: Perform in background thread. */
 		SHFILEINFO shfi;
@@ -96,7 +99,7 @@ INT_PTR DestroyFilesDialog::OnInitDialog()
 		ListView_SetItemText(hListView, iItem, 2, fileSizeText.data());
 
 		TCHAR szDateModified[32];
-		CreateFileTimeString(&wfad.ftLastWriteTime, szDateModified, SIZEOF_ARRAY(szDateModified),
+		CreateFileTimeString(&wfad.ftLastWriteTime, szDateModified, std::size(szDateModified),
 			m_bShowFriendlyDates);
 		ListView_SetItemText(hListView, iItem, 3, szDateModified);
 
@@ -110,11 +113,11 @@ INT_PTR DestroyFilesDialog::OnInitDialog()
 
 	switch (m_pdfdps->m_overwriteMethod)
 	{
-	case NFileOperations::OverwriteMethod::OnePass:
+	case FileOperations::OverwriteMethod::OnePass:
 		CheckDlgButton(m_hDlg, IDC_DESTROYFILES_RADIO_ONEPASS, BST_CHECKED);
 		break;
 
-	case NFileOperations::OverwriteMethod::ThreePass:
+	case FileOperations::OverwriteMethod::ThreePass:
 		CheckDlgButton(m_hDlg, IDC_DESTROYFILES_RADIO_THREEPASS, BST_CHECKED);
 		break;
 	}
@@ -172,11 +175,11 @@ void DestroyFilesDialog::SaveState()
 
 	if (IsDlgButtonChecked(m_hDlg, IDC_DESTROYFILES_RADIO_ONEPASS) == BST_CHECKED)
 	{
-		m_pdfdps->m_overwriteMethod = NFileOperations::OverwriteMethod::OnePass;
+		m_pdfdps->m_overwriteMethod = FileOperations::OverwriteMethod::OnePass;
 	}
 	else
 	{
-		m_pdfdps->m_overwriteMethod = NFileOperations::OverwriteMethod::ThreePass;
+		m_pdfdps->m_overwriteMethod = FileOperations::OverwriteMethod::ThreePass;
 	}
 
 	m_pdfdps->m_bStateSaved = TRUE;
@@ -184,16 +187,15 @@ void DestroyFilesDialog::SaveState()
 
 void DestroyFilesDialog::OnOk()
 {
-	TCHAR szConfirmation[128];
-	LoadString(GetResourceInstance(), IDS_DESTROY_FILES_CONFIRMATION, szConfirmation,
-		SIZEOF_ARRAY(szConfirmation));
+	auto confirmation =
+		ResourceHelper::LoadString(GetResourceInstance(), IDS_DESTROY_FILES_CONFIRMATION);
 
 	/* The default button in this message box will be the second
 	button (i.e. the no button). */
-	int iRes = MessageBox(m_hDlg, szConfirmation, NExplorerplusplus::APP_NAME,
+	int res = MessageBox(m_hDlg, confirmation.c_str(), App::APP_NAME,
 		MB_ICONWARNING | MB_SETFOREGROUND | MB_YESNO | MB_DEFBUTTON2);
 
-	switch (iRes)
+	switch (res)
 	{
 	case IDYES:
 		OnConfirmDestroy();
@@ -212,15 +214,15 @@ void DestroyFilesDialog::OnCancel()
 
 void DestroyFilesDialog::OnConfirmDestroy()
 {
-	NFileOperations::OverwriteMethod overwriteMethod;
+	FileOperations::OverwriteMethod overwriteMethod;
 
 	if (IsDlgButtonChecked(m_hDlg, IDC_DESTROYFILES_RADIO_ONEPASS) == BST_CHECKED)
 	{
-		overwriteMethod = NFileOperations::OverwriteMethod::OnePass;
+		overwriteMethod = FileOperations::OverwriteMethod::OnePass;
 	}
 	else
 	{
-		overwriteMethod = NFileOperations::OverwriteMethod::ThreePass;
+		overwriteMethod = FileOperations::OverwriteMethod::ThreePass;
 	}
 
 	/* TODO: Perform in background thread. */
@@ -235,7 +237,7 @@ void DestroyFilesDialog::OnConfirmDestroy()
 DestroyFilesDialogPersistentSettings::DestroyFilesDialogPersistentSettings() :
 	DialogSettings(SETTINGS_KEY)
 {
-	m_overwriteMethod = NFileOperations::OverwriteMethod::OnePass;
+	m_overwriteMethod = FileOperations::OverwriteMethod::OnePass;
 }
 
 DestroyFilesDialogPersistentSettings &DestroyFilesDialogPersistentSettings::GetInstance()
@@ -254,14 +256,14 @@ void DestroyFilesDialogPersistentSettings::LoadExtraRegistrySettings(HKEY hKey)
 {
 	DWORD value;
 	RegistrySettings::Read32BitValueFromRegistry(hKey, SETTING_OVERWRITE_METHOD, value);
-	m_overwriteMethod = static_cast<NFileOperations::OverwriteMethod>(value);
+	m_overwriteMethod = static_cast<FileOperations::OverwriteMethod>(value);
 }
 
 void DestroyFilesDialogPersistentSettings::SaveExtraXMLSettings(IXMLDOMDocument *pXMLDom,
 	IXMLDOMElement *pParentNode)
 {
-	NXMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_OVERWRITE_METHOD,
-		NXMLSettings::EncodeIntValue(static_cast<int>(m_overwriteMethod)));
+	XMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_OVERWRITE_METHOD,
+		XMLSettings::EncodeIntValue(static_cast<int>(m_overwriteMethod)));
 }
 
 void DestroyFilesDialogPersistentSettings::LoadExtraXMLSettings(BSTR bstrName, BSTR bstrValue)
@@ -269,6 +271,6 @@ void DestroyFilesDialogPersistentSettings::LoadExtraXMLSettings(BSTR bstrName, B
 	if (lstrcmpi(bstrName, SETTING_OVERWRITE_METHOD) == 0)
 	{
 		m_overwriteMethod =
-			static_cast<NFileOperations::OverwriteMethod>(NXMLSettings::DecodeIntValue(bstrValue));
+			static_cast<FileOperations::OverwriteMethod>(XMLSettings::DecodeIntValue(bstrValue));
 	}
 }

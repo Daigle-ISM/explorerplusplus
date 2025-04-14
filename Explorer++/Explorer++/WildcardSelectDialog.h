@@ -13,7 +13,7 @@
 #include <list>
 #include <string>
 
-class CoreInterface;
+class BrowserWindow;
 class WildcardSelectDialog;
 
 class WildcardSelectDialogPersistentSettings : public DialogSettings
@@ -48,8 +48,8 @@ private:
 class WildcardSelectDialog : public ThemedDialog
 {
 public:
-	WildcardSelectDialog(HINSTANCE resourceInstance, HWND hParent, BOOL bSelect,
-		CoreInterface *coreInterface);
+	WildcardSelectDialog(HINSTANCE resourceInstance, HWND hParent, ThemeManager *themeManager,
+		BOOL bSelect, BrowserWindow *browserWindow);
 
 protected:
 	INT_PTR OnInitDialog() override;
@@ -64,10 +64,10 @@ private:
 	void OnCancel();
 	void SelectItems(TCHAR *szPattern);
 
-	CoreInterface *m_coreInterface;
 	BOOL m_bSelect;
+	BrowserWindow *m_browserWindow = nullptr;
 
 	wil::unique_hicon m_icon;
 
-	WildcardSelectDialogPersistentSettings *m_pwsdps;
+	WildcardSelectDialogPersistentSettings *m_pwsdps = nullptr;
 };

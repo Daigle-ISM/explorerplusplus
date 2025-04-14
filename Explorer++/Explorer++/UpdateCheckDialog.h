@@ -6,9 +6,9 @@
 
 #include "ThemedDialog.h"
 #include "../Helper/DialogSettings.h"
-#include "../Helper/Macros.h"
 
 class UpdateCheckDialog;
+class Version;
 
 class UpdateCheckDialogPersistentSettings : public DialogSettings
 {
@@ -21,14 +21,12 @@ private:
 	static const TCHAR SETTINGS_KEY[];
 
 	UpdateCheckDialogPersistentSettings();
-
-	DISALLOW_COPY_AND_ASSIGN(UpdateCheckDialogPersistentSettings);
 };
 
 class UpdateCheckDialog : public ThemedDialog
 {
 public:
-	UpdateCheckDialog(HINSTANCE resourceInstance, HWND hParent);
+	UpdateCheckDialog(HINSTANCE resourceInstance, HWND hParent, ThemeManager *themeManager);
 
 protected:
 	INT_PTR OnInitDialog() override;
@@ -42,15 +40,6 @@ protected:
 	INT_PTR OnPrivateMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) override;
 
 private:
-	struct Version
-	{
-		int MajorVersion;
-		int MinorVersion;
-		int MicroVersion;
-
-		WCHAR VersionString[32];
-	};
-
 	static const int WM_APP_UPDATE_CHECK_COMPLETE = WM_APP + 1;
 
 	static const int UPDATE_CHECK_ERROR = 0;
@@ -64,7 +53,7 @@ private:
 	static void PerformUpdateCheck(HWND hDlg);
 
 	void OnUpdateCheckError();
-	void OnUpdateCheckSuccess(Version *version);
+	void OnUpdateCheckSuccess(Version *availableVersion);
 
 	bool m_UpdateCheckComplete;
 

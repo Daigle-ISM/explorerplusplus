@@ -17,11 +17,11 @@ namespace ApplicationToolbarRegistryStorage
 namespace
 {
 
-const TCHAR APPLICATION_TOOLBAR_KEY_PATH[] = _T("ApplicationToolbar");
+const wchar_t APPLICATION_TOOLBAR_KEY_PATH[] = L"ApplicationToolbar";
 
-const TCHAR SETTING_NAME[] = _T("Name");
-const TCHAR SETTING_COMMAND[] = _T("Command");
-const TCHAR SETTING_SHOW_NAME_ON_TOOLBAR[] = _T("ShowNameOnToolbar");
+const wchar_t SETTING_NAME[] = L"Name";
+const wchar_t SETTING_COMMAND[] = L"Command";
+const wchar_t SETTING_SHOW_NAME_ON_TOOLBAR[] = L"ShowNameOnToolbar";
 
 std::unique_ptr<Application> LoadApplication(HKEY key)
 {
@@ -101,12 +101,11 @@ void SaveToKey(HKEY parentKey, const ApplicationModel *model)
 
 }
 
-void Load(const std::wstring &mainKeyPath, ApplicationModel *model)
+void Load(HKEY applicationKey, ApplicationModel *model)
 {
 	wil::unique_hkey applicationToolbarKey;
-	std::wstring fullKeyPath = mainKeyPath + L"\\" + APPLICATION_TOOLBAR_KEY_PATH;
-	LSTATUS res =
-		RegOpenKeyEx(HKEY_CURRENT_USER, fullKeyPath.c_str(), 0, KEY_READ, &applicationToolbarKey);
+	LSTATUS res = RegOpenKeyEx(applicationKey, APPLICATION_TOOLBAR_KEY_PATH, 0, KEY_READ,
+		&applicationToolbarKey);
 
 	if (res == ERROR_SUCCESS)
 	{
@@ -114,13 +113,10 @@ void Load(const std::wstring &mainKeyPath, ApplicationModel *model)
 	}
 }
 
-void Save(const std::wstring &mainKeyPath, const ApplicationModel *model)
+void Save(HKEY applicationKey, const ApplicationModel *model)
 {
-	std::wstring fullKeyPath = mainKeyPath + L"\\" + APPLICATION_TOOLBAR_KEY_PATH;
-	SHDeleteKey(HKEY_CURRENT_USER, fullKeyPath.c_str());
-
 	wil::unique_hkey applicationToolbarKey;
-	LSTATUS res = RegCreateKeyEx(HKEY_CURRENT_USER, fullKeyPath.c_str(), 0, nullptr,
+	LSTATUS res = RegCreateKeyEx(applicationKey, APPLICATION_TOOLBAR_KEY_PATH, 0, nullptr,
 		REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &applicationToolbarKey, nullptr);
 
 	if (res == ERROR_SUCCESS)

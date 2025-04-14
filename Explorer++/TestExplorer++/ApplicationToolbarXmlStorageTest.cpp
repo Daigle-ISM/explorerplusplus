@@ -6,10 +6,10 @@
 #include "ApplicationToolbarXmlStorage.h"
 #include "Application.h"
 #include "ApplicationModel.h"
-#include "ApplicationToolbarStorageHelper.h"
+#include "ApplicationToolbarStorageTestHelper.h"
 #include "MovableModelHelper.h"
-#include "ResourceHelper.h"
-#include "XmlStorageHelper.h"
+#include "ResourceTestHelper.h"
+#include "XmlStorageTestHelper.h"
 #include <gtest/gtest.h>
 
 using namespace Applications;
@@ -25,11 +25,10 @@ TEST_F(ApplicationToolbarXmlStorageTest, Load)
 	BuildLoadSaveReferenceModel(&referenceModel);
 
 	std::wstring xmlFilePath = GetResourcePath(L"application-toolbar-config.xml");
-	auto xmlDocument = LoadXmlDocument(xmlFilePath);
-	ASSERT_TRUE(xmlDocument);
+	auto xmlDocumentData = LoadXmlDocument(xmlFilePath);
 
 	ApplicationModel loadedModel;
-	ApplicationToolbarXmlStorage::Load(xmlDocument.get(), &loadedModel);
+	ApplicationToolbarXmlStorage::Load(xmlDocumentData.rootNode.get(), &loadedModel);
 
 	EXPECT_EQ(loadedModel, referenceModel);
 }
@@ -40,13 +39,12 @@ TEST_F(ApplicationToolbarXmlStorageTest, Save)
 	BuildLoadSaveReferenceModel(&referenceModel);
 
 	auto xmlDocumentData = CreateXmlDocument();
-	ASSERT_TRUE(xmlDocumentData);
 
-	ApplicationToolbarXmlStorage::Save(xmlDocumentData->xmlDocument.get(),
-		xmlDocumentData->root.get(), &referenceModel);
+	ApplicationToolbarXmlStorage::Save(xmlDocumentData.xmlDocument.get(),
+		xmlDocumentData.rootNode.get(), &referenceModel);
 
 	ApplicationModel loadedModel;
-	ApplicationToolbarXmlStorage::Load(xmlDocumentData->xmlDocument.get(), &loadedModel);
+	ApplicationToolbarXmlStorage::Load(xmlDocumentData.rootNode.get(), &loadedModel);
 
 	EXPECT_EQ(loadedModel, referenceModel);
 }

@@ -18,11 +18,11 @@ namespace ApplicationToolbarXmlStorage
 namespace
 {
 
-const TCHAR APPLICATION_TOOLBAR_NODE_NAME[] = _T("ApplicationToolbar");
+const wchar_t APPLICATION_TOOLBAR_NODE_NAME[] = L"ApplicationToolbar";
 
-const TCHAR SETTING_NAME[] = _T("name");
-const TCHAR SETTING_COMMAND[] = _T("Command");
-const TCHAR SETTING_SHOW_NAME_ON_TOOLBAR[] = _T("ShowNameOnToolbar");
+const wchar_t SETTING_NAME[] = L"name";
+const wchar_t SETTING_COMMAND[] = L"Command";
+const wchar_t SETTING_SHOW_NAME_ON_TOOLBAR[] = L"ShowNameOnToolbar";
 
 std::unique_ptr<Application> LoadApplication(IXMLDOMNode *parentNode)
 {
@@ -35,7 +35,7 @@ std::unique_ptr<Application> LoadApplication(IXMLDOMNode *parentNode)
 	}
 
 	std::wstring name;
-	hr = NXMLSettings::GetStringFromMap(attributeMap.get(), SETTING_NAME, name);
+	hr = XMLSettings::GetStringFromMap(attributeMap.get(), SETTING_NAME, name);
 
 	if (FAILED(hr))
 	{
@@ -43,7 +43,7 @@ std::unique_ptr<Application> LoadApplication(IXMLDOMNode *parentNode)
 	}
 
 	std::wstring command;
-	hr = NXMLSettings::GetStringFromMap(attributeMap.get(), SETTING_COMMAND, command);
+	hr = XMLSettings::GetStringFromMap(attributeMap.get(), SETTING_COMMAND, command);
 
 	if (FAILED(hr))
 	{
@@ -51,7 +51,7 @@ std::unique_ptr<Application> LoadApplication(IXMLDOMNode *parentNode)
 	}
 
 	bool showNameOnToolbar;
-	hr = NXMLSettings::GetBoolFromMap(attributeMap.get(), SETTING_SHOW_NAME_ON_TOOLBAR,
+	hr = XMLSettings::GetBoolFromMap(attributeMap.get(), SETTING_SHOW_NAME_ON_TOOLBAR,
 		showNameOnToolbar);
 
 	if (FAILED(hr))
@@ -92,13 +92,13 @@ void SaveApplication(IXMLDOMDocument *xmlDocument, IXMLDOMElement *parentNode,
 	const Application *application)
 {
 	wil::com_ptr_nothrow<IXMLDOMElement> applicationNode;
-	NXMLSettings::CreateElementNode(xmlDocument, &applicationNode, parentNode,
+	XMLSettings::CreateElementNode(xmlDocument, &applicationNode, parentNode,
 		_T("ApplicationButton"), application->GetName().c_str());
-	NXMLSettings::AddAttributeToNode(xmlDocument, applicationNode.get(), SETTING_COMMAND,
+	XMLSettings::AddAttributeToNode(xmlDocument, applicationNode.get(), SETTING_COMMAND,
 		application->GetCommand().c_str());
-	NXMLSettings::AddAttributeToNode(xmlDocument, applicationNode.get(),
+	XMLSettings::AddAttributeToNode(xmlDocument, applicationNode.get(),
 		SETTING_SHOW_NAME_ON_TOOLBAR,
-		NXMLSettings::EncodeBoolValue(application->GetShowNameOnToolbar()));
+		XMLSettings::EncodeBoolValue(application->GetShowNameOnToolbar()));
 }
 
 void SaveToNode(IXMLDOMDocument *xmlDocument, IXMLDOMElement *parentNode,
@@ -112,15 +112,13 @@ void SaveToNode(IXMLDOMDocument *xmlDocument, IXMLDOMElement *parentNode,
 
 }
 
-void Load(IXMLDOMDocument *xmlDocument, ApplicationModel *model)
+void Load(IXMLDOMNode *rootNode, ApplicationModel *model)
 {
 	wil::com_ptr_nothrow<IXMLDOMNode> applicationToolbarNode;
-	auto queryString = wil::make_bstr_nothrow(
-		(std::wstring(L"/ExplorerPlusPlus/") + std::wstring(APPLICATION_TOOLBAR_NODE_NAME))
-			.c_str());
-	HRESULT hr = xmlDocument->selectSingleNode(queryString.get(), &applicationToolbarNode);
+	auto queryString = wil::make_bstr_nothrow(APPLICATION_TOOLBAR_NODE_NAME);
+	HRESULT hr = rootNode->selectSingleNode(queryString.get(), &applicationToolbarNode);
 
-	if (FAILED(hr))
+	if (hr != S_OK)
 	{
 		return;
 	}
@@ -128,7 +126,7 @@ void Load(IXMLDOMDocument *xmlDocument, ApplicationModel *model)
 	LoadFromNode(applicationToolbarNode.get(), model);
 }
 
-void Save(IXMLDOMDocument *xmlDocument, IXMLDOMElement *rootNode, const ApplicationModel *model)
+void Save(IXMLDOMDocument *xmlDocument, IXMLDOMNode *rootNode, const ApplicationModel *model)
 {
 	wil::com_ptr_nothrow<IXMLDOMElement> applicationToolbarNode;
 	auto nodeName = wil::make_bstr_nothrow(APPLICATION_TOOLBAR_NODE_NAME);
@@ -141,7 +139,7 @@ void Save(IXMLDOMDocument *xmlDocument, IXMLDOMElement *rootNode, const Applicat
 
 	SaveToNode(xmlDocument, applicationToolbarNode.get(), model);
 
-	NXMLSettings::AppendChildToParent(applicationToolbarNode.get(), rootNode);
+	XMLSettings::AppendChildToParent(applicationToolbarNode.get(), rootNode);
 }
 
 }

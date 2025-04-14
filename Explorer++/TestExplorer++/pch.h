@@ -27,6 +27,11 @@
 #include <boost/bimap.hpp>
 #include <boost/signals2.hpp>
 
+// Google logging Header Files:
+#define GLOG_NO_ABBREVIATED_SEVERITIES
+#define GLOG_USE_GLOG_EXPORT
+#include <glog/logging.h>
+
 // WIL Header Files:
 #include <wil/resource.h>
 

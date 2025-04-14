@@ -4,20 +4,21 @@
 
 #include "stdafx.h"
 #include "Explorer++.h"
+#include "App.h"
 #include "Config.h"
 #include "DisplayWindow/DisplayWindow.h"
 #include "MainResource.h"
-#include "ShellBrowser/ShellBrowser.h"
-#include "TabContainer.h"
+#include "ShellBrowser/ShellBrowserImpl.h"
+#include "TabContainerImpl.h"
 #include "../Helper/FolderSize.h"
 #include "../Helper/Helper.h"
 #include "../Helper/ShellHelper.h"
 
 void Explorerplusplus::UpdateDisplayWindow(const Tab &tab)
 {
-	DisplayWindow_ClearTextBuffer(m_hDisplayWindow);
+	DisplayWindow_ClearTextBuffer(m_displayWindow->GetHWND());
 
-	int nSelected = tab.GetShellBrowser()->GetNumSelected();
+	int nSelected = tab.GetShellBrowserImpl()->GetNumSelected();
 
 	if (nSelected == 0)
 	{
@@ -36,11 +37,11 @@ void Explorerplusplus::UpdateDisplayWindow(const Tab &tab)
 void Explorerplusplus::UpdateDisplayWindowForZeroFiles(const Tab &tab)
 {
 	/* Clear out any previous data shown in the display window. */
-	DisplayWindow_ClearTextBuffer(m_hDisplayWindow);
-	DisplayWindow_SetThumbnailFile(m_hDisplayWindow, EMPTY_STRING, FALSE);
+	DisplayWindow_ClearTextBuffer(m_displayWindow->GetHWND());
+	DisplayWindow_SetThumbnailFile(m_displayWindow->GetHWND(), L"", FALSE);
 
-	std::wstring currentDirectory = tab.GetShellBrowser()->GetDirectory();
-	auto pidlDirectory = tab.GetShellBrowser()->GetDirectoryIdl();
+	std::wstring currentDirectory = tab.GetShellBrowserImpl()->GetDirectory();
+	auto pidlDirectory = tab.GetShellBrowserImpl()->GetDirectoryIdl();
 
 	unique_pidl_absolute pidlComputer;
 	SHGetFolderLocation(nullptr, CSIDL_DRIVES, nullptr, 0, wil::out_param(pidlComputer));
@@ -48,9 +49,9 @@ void Explorerplusplus::UpdateDisplayWindowForZeroFiles(const Tab &tab)
 	if (ArePidlsEquivalent(pidlDirectory.get(), pidlComputer.get()))
 	{
 		TCHAR szDisplay[512];
-		DWORD dwSize = SIZEOF_ARRAY(szDisplay);
+		DWORD dwSize = std::size(szDisplay);
 		GetComputerName(szDisplay, &dwSize);
-		DisplayWindow_BufferText(m_hDisplayWindow, szDisplay);
+		DisplayWindow_BufferText(m_displayWindow->GetHWND(), szDisplay);
 
 		std::wstring cpuBrand;
 		TCHAR szTemp[512];
@@ -58,10 +59,10 @@ void Explorerplusplus::UpdateDisplayWindowForZeroFiles(const Tab &tab)
 
 		if (SUCCEEDED(hr))
 		{
-			LoadString(m_resourceInstance, IDS_GENERAL_DISPLAY_WINDOW_PROCESSOR, szTemp,
-				SIZEOF_ARRAY(szTemp));
-			StringCchPrintf(szDisplay, SIZEOF_ARRAY(szDisplay), szTemp, cpuBrand.c_str());
-			DisplayWindow_BufferText(m_hDisplayWindow, szDisplay);
+			LoadString(m_app->GetResourceInstance(), IDS_GENERAL_DISPLAY_WINDOW_PROCESSOR, szTemp,
+				std::size(szTemp));
+			StringCchPrintf(szDisplay, std::size(szDisplay), szTemp, cpuBrand.c_str());
+			DisplayWindow_BufferText(m_displayWindow->GetHWND(), szDisplay);
 		}
 
 		MEMORYSTATUSEX memoryStatus = {};
@@ -69,23 +70,23 @@ void Explorerplusplus::UpdateDisplayWindowForZeroFiles(const Tab &tab)
 		GlobalMemoryStatusEx(&memoryStatus);
 
 		auto memorySizeText = FormatSizeString(memoryStatus.ullTotalPhys);
-		LoadString(m_resourceInstance, IDS_GENERAL_DISPLAY_WINDOW_MEMORY, szTemp,
-			SIZEOF_ARRAY(szTemp));
-		StringCchPrintf(szDisplay, SIZEOF_ARRAY(szDisplay), szTemp, memorySizeText.c_str());
-		DisplayWindow_BufferText(m_hDisplayWindow, szDisplay);
+		LoadString(m_app->GetResourceInstance(), IDS_GENERAL_DISPLAY_WINDOW_MEMORY, szTemp,
+			std::size(szTemp));
+		StringCchPrintf(szDisplay, std::size(szDisplay), szTemp, memorySizeText.c_str());
+		DisplayWindow_BufferText(m_displayWindow->GetHWND(), szDisplay);
 	}
 	else
 	{
 		/* Folder name. */
 		std::wstring folderName;
 		GetDisplayName(currentDirectory.c_str(), SHGDN_INFOLDER, folderName);
-		DisplayWindow_BufferText(m_hDisplayWindow, folderName.c_str());
+		DisplayWindow_BufferText(m_displayWindow->GetHWND(), folderName.c_str());
 
 		/* Folder type. */
 		SHFILEINFO shfi;
 		SHGetFileInfo(reinterpret_cast<LPCTSTR>(pidlDirectory.get()), 0, &shfi, sizeof(shfi),
 			SHGFI_PIDL | SHGFI_TYPENAME);
-		DisplayWindow_BufferText(m_hDisplayWindow, shfi.szTypeName);
+		DisplayWindow_BufferText(m_displayWindow->GetHWND(), shfi.szTypeName);
 	}
 }
 
@@ -102,18 +103,18 @@ void Explorerplusplus::UpdateDisplayWindowForOneFile(const Tab &tab)
 
 	if (iSelected != -1)
 	{
-		std::wstring filename = tab.GetShellBrowser()->GetItemName(iSelected);
+		std::wstring filename = tab.GetShellBrowserImpl()->GetItemName(iSelected);
 
 		/* File name. */
-		DisplayWindow_BufferText(m_hDisplayWindow, filename.c_str());
+		DisplayWindow_BufferText(m_displayWindow->GetHWND(), filename.c_str());
 
-		std::wstring fullItemName = tab.GetShellBrowser()->GetItemFullName(iSelected);
+		std::wstring fullItemName = tab.GetShellBrowserImpl()->GetItemFullName(iSelected);
 
-		if (!tab.GetShellBrowser()->InVirtualFolder())
+		if (!tab.GetShellBrowserImpl()->InVirtualFolder())
 		{
 			DWORD dwAttributes;
 
-			wfd = tab.GetShellBrowser()->GetItemFileFindData(iSelected);
+			wfd = tab.GetShellBrowserImpl()->GetItemFileFindData(iSelected);
 
 			dwAttributes = GetFileAttributes(fullItemName.c_str());
 
@@ -142,20 +143,20 @@ void Explorerplusplus::UpdateDisplayWindowForOneFile(const Tab &tab)
 
 						pfs->pfnCallback = FolderSizeCallbackStub;
 
-						StringCchCopy(pfs->szPath, SIZEOF_ARRAY(pfs->szPath), fullItemName.c_str());
+						StringCchCopy(pfs->szPath, std::size(pfs->szPath), fullItemName.c_str());
 
-						LoadString(m_resourceInstance, IDS_GENERAL_TOTALSIZE, szTotalSize,
-							SIZEOF_ARRAY(szTotalSize));
-						LoadString(m_resourceInstance, IDS_GENERAL_CALCULATING, szCalculating,
-							SIZEOF_ARRAY(szCalculating));
-						StringCchPrintf(szDisplayText, SIZEOF_ARRAY(szDisplayText), _T("%s: %s"),
+						LoadString(m_app->GetResourceInstance(), IDS_GENERAL_TOTALSIZE, szTotalSize,
+							std::size(szTotalSize));
+						LoadString(m_app->GetResourceInstance(), IDS_GENERAL_CALCULATING,
+							szCalculating, std::size(szCalculating));
+						StringCchPrintf(szDisplayText, std::size(szDisplayText), _T("%s: %s"),
 							szTotalSize, szCalculating);
-						DisplayWindow_BufferText(m_hDisplayWindow, szDisplayText);
+						DisplayWindow_BufferText(m_displayWindow->GetHWND(), szDisplayText);
 
 						/* Maintain a global list of folder size operations. */
 						displayWindowFolderSize.uId = m_iDWFolderSizeUniqueId;
 						displayWindowFolderSize.iTabId =
-							GetActivePane()->GetTabContainer()->GetSelectedTab().GetId();
+							GetActivePane()->GetTabContainerImpl()->GetSelectedTab().GetId();
 						displayWindowFolderSize.bValid = TRUE;
 						m_DWFolderSizes.push_back(displayWindowFolderSize);
 
@@ -176,20 +177,20 @@ void Explorerplusplus::UpdateDisplayWindowForOneFile(const Tab &tab)
 				SHGetFileInfo(fullItemName.c_str(), wfd.dwFileAttributes, &shfi, sizeof(shfi),
 					SHGFI_TYPENAME | SHGFI_USEFILEATTRIBUTES);
 
-				DisplayWindow_BufferText(m_hDisplayWindow, shfi.szTypeName);
+				DisplayWindow_BufferText(m_displayWindow->GetHWND(), shfi.szTypeName);
 			}
 
-			CreateFileTimeString(&wfd.ftLastWriteTime, szFileDate, SIZEOF_ARRAY(szFileDate),
+			CreateFileTimeString(&wfd.ftLastWriteTime, szFileDate, std::size(szFileDate),
 				m_config->globalFolderSettings.showFriendlyDates);
 
-			LoadString(m_resourceInstance, IDS_GENERAL_DATEMODIFIED, szDateModified,
-				SIZEOF_ARRAY(szDateModified));
+			LoadString(m_app->GetResourceInstance(), IDS_GENERAL_DATEMODIFIED, szDateModified,
+				std::size(szDateModified));
 
-			StringCchPrintf(szDisplayDate, SIZEOF_ARRAY(szDisplayDate), _T("%s: %s"),
-				szDateModified, szFileDate);
+			StringCchPrintf(szDisplayDate, std::size(szDisplayDate), _T("%s: %s"), szDateModified,
+				szFileDate);
 
 			/* File (modified) date. */
-			DisplayWindow_BufferText(m_hDisplayWindow, szDisplayDate);
+			DisplayWindow_BufferText(m_displayWindow->GetHWND(), szDisplayDate);
 
 			if (IsImage(fullItemName.c_str()))
 			{
@@ -204,16 +205,16 @@ void Explorerplusplus::UpdateDisplayWindowForOneFile(const Tab &tab)
 				if (pimg->GetLastStatus() == Gdiplus::Ok)
 				{
 					uWidth = pimg->GetWidth();
-					LoadString(m_resourceInstance, IDS_GENERAL_DISPLAYWINDOW_IMAGEWIDTH, szTemp,
-						SIZEOF_ARRAY(szTemp));
-					StringCchPrintf(szOutput, SIZEOF_ARRAY(szOutput), szTemp, uWidth);
-					DisplayWindow_BufferText(m_hDisplayWindow, szOutput);
+					LoadString(m_app->GetResourceInstance(), IDS_GENERAL_DISPLAYWINDOW_IMAGEWIDTH,
+						szTemp, std::size(szTemp));
+					StringCchPrintf(szOutput, std::size(szOutput), szTemp, uWidth);
+					DisplayWindow_BufferText(m_displayWindow->GetHWND(), szOutput);
 
 					uHeight = pimg->GetHeight();
-					LoadString(m_resourceInstance, IDS_GENERAL_DISPLAYWINDOW_IMAGEHEIGHT, szTemp,
-						SIZEOF_ARRAY(szTemp));
-					StringCchPrintf(szOutput, SIZEOF_ARRAY(szOutput), szTemp, uHeight);
-					DisplayWindow_BufferText(m_hDisplayWindow, szOutput);
+					LoadString(m_app->GetResourceInstance(), IDS_GENERAL_DISPLAYWINDOW_IMAGEHEIGHT,
+						szTemp, std::size(szTemp));
+					StringCchPrintf(szOutput, std::size(szOutput), szTemp, uHeight);
+					DisplayWindow_BufferText(m_displayWindow->GetHWND(), szOutput);
 
 					Gdiplus::PixelFormat format;
 					UINT uBitDepth;
@@ -267,32 +268,32 @@ void Explorerplusplus::UpdateDisplayWindowForOneFile(const Tab &tab)
 
 					if (uBitDepth == 0)
 					{
-						LoadString(m_resourceInstance, IDS_GENERAL_DISPLAYWINDOW_BITDEPTHUNKNOWN,
-							szTemp, SIZEOF_ARRAY(szTemp));
-						StringCchCopy(szOutput, SIZEOF_ARRAY(szOutput), szTemp);
+						LoadString(m_app->GetResourceInstance(),
+							IDS_GENERAL_DISPLAYWINDOW_BITDEPTHUNKNOWN, szTemp, std::size(szTemp));
+						StringCchCopy(szOutput, std::size(szOutput), szTemp);
 					}
 					else
 					{
-						LoadString(m_resourceInstance, IDS_GENERAL_DISPLAYWINDOW_BITDEPTH, szTemp,
-							SIZEOF_ARRAY(szTemp));
-						StringCchPrintf(szOutput, SIZEOF_ARRAY(szOutput), szTemp, uBitDepth);
+						LoadString(m_app->GetResourceInstance(), IDS_GENERAL_DISPLAYWINDOW_BITDEPTH,
+							szTemp, std::size(szTemp));
+						StringCchPrintf(szOutput, std::size(szOutput), szTemp, uBitDepth);
 					}
 
-					DisplayWindow_BufferText(m_hDisplayWindow, szOutput);
+					DisplayWindow_BufferText(m_displayWindow->GetHWND(), szOutput);
 
 					Gdiplus::REAL res;
 
 					res = pimg->GetHorizontalResolution();
-					LoadString(m_resourceInstance, IDS_GENERAL_DISPLAYWINDOW_HORIZONTALRESOLUTION,
-						szTemp, SIZEOF_ARRAY(szTemp));
-					StringCchPrintf(szOutput, SIZEOF_ARRAY(szOutput), szTemp, res);
-					DisplayWindow_BufferText(m_hDisplayWindow, szOutput);
+					LoadString(m_app->GetResourceInstance(),
+						IDS_GENERAL_DISPLAYWINDOW_HORIZONTALRESOLUTION, szTemp, std::size(szTemp));
+					StringCchPrintf(szOutput, std::size(szOutput), szTemp, res);
+					DisplayWindow_BufferText(m_displayWindow->GetHWND(), szOutput);
 
 					res = pimg->GetVerticalResolution();
-					LoadString(m_resourceInstance, IDS_GENERAL_DISPLAYWINDOW_VERTICALRESOLUTION,
-						szTemp, SIZEOF_ARRAY(szTemp));
-					StringCchPrintf(szOutput, SIZEOF_ARRAY(szOutput), szTemp, res);
-					DisplayWindow_BufferText(m_hDisplayWindow, szOutput);
+					LoadString(m_app->GetResourceInstance(),
+						IDS_GENERAL_DISPLAYWINDOW_VERTICALRESOLUTION, szTemp, std::size(szTemp));
+					StringCchPrintf(szOutput, std::size(szOutput), szTemp, res);
+					DisplayWindow_BufferText(m_displayWindow->GetHWND(), szOutput);
 				}
 
 				delete pimg;
@@ -301,13 +302,14 @@ void Explorerplusplus::UpdateDisplayWindowForOneFile(const Tab &tab)
 			/* Only attempt to show file previews for files (not folders). Also, only
 			attempt to show a preview if the display window is actually active. */
 			if (((dwAttributes & FILE_ATTRIBUTE_DIRECTORY) != FILE_ATTRIBUTE_DIRECTORY)
-				&& m_config->showFilePreviews && m_config->showDisplayWindow)
+				&& m_config->showFilePreviews && m_config->showDisplayWindow.get())
 			{
-				DisplayWindow_SetThumbnailFile(m_hDisplayWindow, fullItemName.c_str(), TRUE);
+				DisplayWindow_SetThumbnailFile(m_displayWindow->GetHWND(), fullItemName.c_str(),
+					TRUE);
 			}
 			else
 			{
-				DisplayWindow_SetThumbnailFile(m_hDisplayWindow, EMPTY_STRING, FALSE);
+				DisplayWindow_SetThumbnailFile(m_displayWindow->GetHWND(), L"", FALSE);
 			}
 		}
 		else
@@ -324,28 +326,28 @@ void Explorerplusplus::UpdateDisplayWindowForOneFile(const Tab &tab)
 				if (bRet)
 				{
 					auto sizeText = FormatSizeString(ulTotalNumberOfFreeBytes.QuadPart);
-					LoadString(m_resourceInstance, IDS_GENERAL_DISPLAY_WINDOW_FREE_SPACE, szTemp,
-						SIZEOF_ARRAY(szTemp));
-					StringCchPrintf(szMsg, SIZEOF_ARRAY(szMsg), szTemp, sizeText.c_str());
-					DisplayWindow_BufferText(m_hDisplayWindow, szMsg);
+					LoadString(m_app->GetResourceInstance(), IDS_GENERAL_DISPLAY_WINDOW_FREE_SPACE,
+						szTemp, std::size(szTemp));
+					StringCchPrintf(szMsg, std::size(szMsg), szTemp, sizeText.c_str());
+					DisplayWindow_BufferText(m_displayWindow->GetHWND(), szMsg);
 
 					sizeText = FormatSizeString(ulTotalNumberOfBytes.QuadPart);
-					LoadString(m_resourceInstance, IDS_GENERAL_DISPLAY_WINDOW_TOTAL_SIZE, szTemp,
-						SIZEOF_ARRAY(szTemp));
-					StringCchPrintf(szMsg, SIZEOF_ARRAY(szMsg), szTemp, sizeText.c_str());
-					DisplayWindow_BufferText(m_hDisplayWindow, szMsg);
+					LoadString(m_app->GetResourceInstance(), IDS_GENERAL_DISPLAY_WINDOW_TOTAL_SIZE,
+						szTemp, std::size(szTemp));
+					StringCchPrintf(szMsg, std::size(szMsg), szTemp, sizeText.c_str());
+					DisplayWindow_BufferText(m_displayWindow->GetHWND(), szMsg);
 				}
 
 				TCHAR szFileSystem[MAX_PATH + 1];
 				bRet = GetVolumeInformation(fullItemName.c_str(), nullptr, 0, nullptr, nullptr,
-					nullptr, szFileSystem, SIZEOF_ARRAY(szFileSystem));
+					nullptr, szFileSystem, std::size(szFileSystem));
 
 				if (bRet)
 				{
-					LoadString(m_resourceInstance, IDS_GENERAL_DISPLAY_WINDOW_FILE_SYSTEM, szTemp,
-						SIZEOF_ARRAY(szTemp));
-					StringCchPrintf(szMsg, SIZEOF_ARRAY(szMsg), szTemp, szFileSystem);
-					DisplayWindow_BufferText(m_hDisplayWindow, szMsg);
+					LoadString(m_app->GetResourceInstance(), IDS_GENERAL_DISPLAY_WINDOW_FILE_SYSTEM,
+						szTemp, std::size(szTemp));
+					StringCchPrintf(szMsg, std::size(szMsg), szTemp, szFileSystem);
+					DisplayWindow_BufferText(m_displayWindow->GetHWND(), szMsg);
 				}
 			}
 		}
@@ -354,37 +356,37 @@ void Explorerplusplus::UpdateDisplayWindowForOneFile(const Tab &tab)
 
 void Explorerplusplus::UpdateDisplayWindowForMultipleFiles(const Tab &tab)
 {
-	TCHAR szNumSelected[64] = EMPTY_STRING;
-	TCHAR szTotalSize[64] = EMPTY_STRING;
+	TCHAR szNumSelected[64] = L"";
+	TCHAR szTotalSize[64] = L"";
 	TCHAR szMore[64];
 	TCHAR szTotalSizeString[64];
 	int nSelected;
 
-	DisplayWindow_SetThumbnailFile(m_hDisplayWindow, EMPTY_STRING, FALSE);
+	DisplayWindow_SetThumbnailFile(m_displayWindow->GetHWND(), L"", FALSE);
 
-	nSelected = tab.GetShellBrowser()->GetNumSelected();
+	nSelected = tab.GetShellBrowserImpl()->GetNumSelected();
 
-	LoadString(m_resourceInstance, IDS_GENERAL_SELECTED_MULTIPLE_ITEMS, szMore,
-		SIZEOF_ARRAY(szMore));
+	LoadString(m_app->GetResourceInstance(), IDS_GENERAL_SELECTED_MULTIPLE_ITEMS, szMore,
+		std::size(szMore));
 
-	StringCchPrintf(szNumSelected, SIZEOF_ARRAY(szNumSelected), _T("%d %s"), nSelected, szMore);
+	StringCchPrintf(szNumSelected, std::size(szNumSelected), _T("%d %s"), nSelected, szMore);
 
-	DisplayWindow_BufferText(m_hDisplayWindow, szNumSelected);
+	DisplayWindow_BufferText(m_displayWindow->GetHWND(), szNumSelected);
 
-	if (!tab.GetShellBrowser()->InVirtualFolder())
+	if (!tab.GetShellBrowserImpl()->InVirtualFolder())
 	{
-		uint64_t selectionSize = tab.GetShellBrowser()->GetSelectionSize();
-		SizeDisplayFormat displayFormat = m_config->globalFolderSettings.forceSize
+		uint64_t selectionSize = tab.GetShellBrowserImpl()->GetSelectionSize();
+		auto displayFormat = m_config->globalFolderSettings.forceSize
 			? m_config->globalFolderSettings.sizeDisplayFormat
-			: SizeDisplayFormat::None;
+			: +SizeDisplayFormat::None;
 		auto selectionSizeText = FormatSizeString(selectionSize, displayFormat);
 
-		LoadString(m_resourceInstance, IDS_GENERAL_TOTALFILESIZE, szTotalSizeString,
-			SIZEOF_ARRAY(szTotalSizeString));
+		LoadString(m_app->GetResourceInstance(), IDS_GENERAL_TOTALFILESIZE, szTotalSizeString,
+			std::size(szTotalSizeString));
 
-		StringCchPrintf(szTotalSize, SIZEOF_ARRAY(szTotalSize), _T("%s: %s"), szTotalSizeString,
+		StringCchPrintf(szTotalSize, std::size(szTotalSize), _T("%s: %s"), szTotalSizeString,
 			selectionSizeText.c_str());
 	}
 
-	DisplayWindow_BufferText(m_hDisplayWindow, szTotalSize);
+	DisplayWindow_BufferText(m_displayWindow->GetHWND(), szTotalSize);
 }

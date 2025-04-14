@@ -4,25 +4,26 @@
 
 #include "stdafx.h"
 #include "SearchDialog.h"
+#include "BrowserWindow.h"
 #include "CoreInterface.h"
 #include "DialogConstants.h"
 #include "IconResourceLoader.h"
 #include "MainResource.h"
-#include "Navigator.h"
 #include "ResourceHelper.h"
-#include "ShellBrowser/ShellBrowser.h"
-#include "TabContainer.h"
+#include "ShellBrowser/NavigateParams.h"
+#include "ShellBrowser/ShellBrowserImpl.h"
+#include "TabContainerImpl.h"
 #include "../Helper/BaseDialog.h"
 #include "../Helper/ComboBox.h"
 #include "../Helper/Controls.h"
 #include "../Helper/DpiCompatibility.h"
-#include "../Helper/FileContextMenuManager.h"
 #include "../Helper/Helper.h"
-#include "../Helper/Macros.h"
 #include "../Helper/RegistrySettings.h"
+#include "../Helper/ShellContextMenu.h"
 #include "../Helper/ShellHelper.h"
 #include "../Helper/WindowHelper.h"
 #include "../Helper/XMLSettings.h"
+#include <algorithm>
 #include <regex>
 
 namespace NSearchDialog
@@ -57,20 +58,21 @@ const TCHAR SearchDialogPersistentSettings::SETTING_SORT_ASCENDING[] = _T("SortA
 const TCHAR SearchDialogPersistentSettings::SETTING_DIRECTORY_LIST[] = _T("Directory");
 const TCHAR SearchDialogPersistentSettings::SETTING_PATTERN_LIST[] = _T("Pattern");
 
-SearchDialog::SearchDialog(HINSTANCE resourceInstance, HWND hParent,
-	std::wstring_view searchDirectory, CoreInterface *coreInterface, Navigator *navigator,
-	TabContainer *tabContainer) :
-	ThemedDialog(resourceInstance, IDD_SEARCH, hParent, DialogSizingType::Both),
+SearchDialog::SearchDialog(HINSTANCE resourceInstance, HWND hParent, ThemeManager *themeManager,
+	std::wstring_view searchDirectory, BrowserWindow *browserWindow, CoreInterface *coreInterface,
+	TabContainerImpl *tabContainerImpl, const IconResourceLoader *iconResourceLoader) :
+	ThemedDialog(resourceInstance, IDD_SEARCH, hParent, DialogSizingType::Both, themeManager),
 	m_searchDirectory(searchDirectory),
+	m_browserWindow(browserWindow),
 	m_coreInterface(coreInterface),
-	m_navigator(navigator),
-	m_tabContainer(tabContainer),
+	m_tabContainerImpl(tabContainerImpl),
+	m_iconResourceLoader(iconResourceLoader),
 	m_bSearching(FALSE),
 	m_bStopSearching(FALSE),
-	m_bSetSearchTimer(TRUE),
+	m_pSearch(nullptr),
 	m_iInternalIndex(0),
 	m_iPreviousSelectedColumn(-1),
-	m_pSearch(nullptr)
+	m_bSetSearchTimer(TRUE)
 {
 	m_persistentSettings = &SearchDialogPersistentSettings::GetInstance();
 }
@@ -87,8 +89,7 @@ SearchDialog::~SearchDialog()
 INT_PTR SearchDialog::OnInitDialog()
 {
 	UINT dpi = DpiCompatibility::GetInstance().GetDpiForWindow(m_hDlg);
-	m_directoryIcon =
-		m_coreInterface->GetIconResourceLoader()->LoadIconFromPNGForDpi(Icon::Folder, 16, 16, dpi);
+	m_directoryIcon = m_iconResourceLoader->LoadIconFromPNGForDpi(Icon::Folder, 16, 16, dpi);
 	SendMessage(GetDlgItem(m_hDlg, IDC_BUTTON_DIRECTORY), BM_SETIMAGE, IMAGE_ICON,
 		reinterpret_cast<LPARAM>(m_directoryIcon.get()));
 
@@ -105,12 +106,11 @@ INT_PTR SearchDialog::OnInitDialog()
 
 	for (const auto &ci : m_persistentSettings->m_Columns)
 	{
-		TCHAR szTemp[128];
-		LoadString(GetResourceInstance(), ci.uStringID, szTemp, SIZEOF_ARRAY(szTemp));
+		auto columnName = ResourceHelper::LoadString(GetResourceInstance(), ci.uStringID);
 
 		LVCOLUMN lvColumn;
 		lvColumn.mask = LVCF_TEXT;
-		lvColumn.pszText = szTemp;
+		lvColumn.pszText = columnName.data();
 		ListView_InsertColumn(hListView, i, &lvColumn);
 
 		i++;
@@ -172,8 +172,7 @@ INT_PTR SearchDialog::OnInitDialog()
 
 wil::unique_hicon SearchDialog::GetDialogIcon(int iconWidth, int iconHeight) const
 {
-	return m_coreInterface->GetIconResourceLoader()->LoadIconFromPNGAndScale(Icon::Search,
-		iconWidth, iconHeight);
+	return m_iconResourceLoader->LoadIconFromPNGAndScale(Icon::Search, iconWidth, iconHeight);
 }
 
 std::vector<ResizableDialogControl> SearchDialog::GetResizableControls()
@@ -215,16 +214,15 @@ INT_PTR SearchDialog::OnCommand(WPARAM wParam, LPARAM lParam)
 		BROWSEINFO bi;
 		TCHAR szDirectory[MAX_PATH];
 		TCHAR szDisplayName[MAX_PATH];
-		TCHAR szTitle[256];
 
-		LoadString(GetResourceInstance(), IDS_SEARCHDIALOG_TITLE, szTitle, SIZEOF_ARRAY(szTitle));
+		auto title = ResourceHelper::LoadString(GetResourceInstance(), IDS_SEARCHDIALOG_TITLE);
 
-		GetDlgItemText(m_hDlg, IDC_COMBO_DIRECTORY, szDirectory, SIZEOF_ARRAY(szDirectory));
+		GetDlgItemText(m_hDlg, IDC_COMBO_DIRECTORY, szDirectory, std::size(szDirectory));
 
 		bi.hwndOwner = m_hDlg;
 		bi.pidlRoot = nullptr;
 		bi.pszDisplayName = szDisplayName;
-		bi.lpszTitle = szTitle;
+		bi.lpszTitle = title.c_str();
 		bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
 		bi.lpfn = NSearchDialog::BrowseCallbackProc;
 		bi.lParam = reinterpret_cast<LPARAM>(szDirectory);
@@ -296,9 +294,9 @@ void SearchDialog::StartSearching()
 
 	/* Get the directory and name, and remove leading and
 	trailing whitespace. */
-	GetDlgItemText(m_hDlg, IDC_COMBO_DIRECTORY, szBaseDirectory, SIZEOF_ARRAY(szBaseDirectory));
+	GetDlgItemText(m_hDlg, IDC_COMBO_DIRECTORY, szBaseDirectory, std::size(szBaseDirectory));
 	PathRemoveBlanks(szBaseDirectory);
-	GetDlgItemText(m_hDlg, IDC_COMBO_NAME, szSearchPattern, SIZEOF_ARRAY(szSearchPattern));
+	GetDlgItemText(m_hDlg, IDC_COMBO_NAME, szSearchPattern, std::size(szSearchPattern));
 	PathRemoveBlanks(szSearchPattern);
 
 	BOOL bSearchSubFolders = IsDlgButtonChecked(m_hDlg, IDC_CHECK_SEARCHSUBFOLDERS) == BST_CHECKED;
@@ -316,8 +314,8 @@ void SearchDialog::StartSearching()
 		{
 			TCHAR szTemp[MAX_PATH];
 
-			StringCchPrintf(szTemp, SIZEOF_ARRAY(szTemp), _T("*%s*"), szSearchPattern);
-			StringCchCopy(szSearchPattern, SIZEOF_ARRAY(szSearchPattern), szTemp);
+			StringCchPrintf(szTemp, std::size(szTemp), _T("*%s*"), szSearchPattern);
+			StringCchCopy(szSearchPattern, std::size(szSearchPattern), szTemp);
 		}
 	}
 
@@ -376,12 +374,11 @@ void SearchDialog::StartSearching()
 		SaveEntry(IDC_COMBO_NAME, m_persistentSettings->m_searchPatterns);
 	}
 
-	GetDlgItemText(m_hDlg, IDSEARCH, m_szSearchButton, SIZEOF_ARRAY(m_szSearchButton));
+	GetDlgItemText(m_hDlg, IDSEARCH, m_szSearchButton,
+		static_cast<int>(std::size(m_szSearchButton)));
 
-	TCHAR szTemp[64];
-
-	LoadString(GetResourceInstance(), IDS_STOP, szTemp, SIZEOF_ARRAY(szTemp));
-	SetDlgItemText(m_hDlg, IDSEARCH, szTemp);
+	auto stopText = ResourceHelper::LoadString(GetResourceInstance(), IDS_STOP);
+	SetDlgItemText(m_hDlg, IDSEARCH, stopText.c_str());
 
 	m_bSearching = TRUE;
 
@@ -394,7 +391,7 @@ void SearchDialog::StartSearching()
 void SearchDialog::SaveEntry(int comboBoxId, boost::circular_buffer<std::wstring> &buffer)
 {
 	TCHAR entry[MAX_PATH];
-	GetDlgItemText(m_hDlg, comboBoxId, entry, SIZEOF_ARRAY(entry));
+	GetDlgItemText(m_hDlg, comboBoxId, entry, std::size(entry));
 
 	std::wstring strEntry(entry);
 	auto itr = std::find_if(buffer.begin(), buffer.end(),
@@ -534,8 +531,8 @@ int CALLBACK SearchDialog::SortResultsByName(LPARAM lParam1, LPARAM lParam2)
 	TCHAR szFilename1[MAX_PATH];
 	TCHAR szFilename2[MAX_PATH];
 
-	StringCchCopy(szFilename1, SIZEOF_ARRAY(szFilename1), itr1->second.c_str());
-	StringCchCopy(szFilename2, SIZEOF_ARRAY(szFilename2), itr2->second.c_str());
+	StringCchCopy(szFilename1, std::size(szFilename1), itr1->second.c_str());
+	StringCchCopy(szFilename2, std::size(szFilename2), itr2->second.c_str());
 
 	PathStripPath(szFilename1);
 	PathStripPath(szFilename2);
@@ -551,8 +548,8 @@ int CALLBACK SearchDialog::SortResultsByPath(LPARAM lParam1, LPARAM lParam2)
 	TCHAR szPath1[MAX_PATH];
 	TCHAR szPath2[MAX_PATH];
 
-	StringCchCopy(szPath1, SIZEOF_ARRAY(szPath1), itr1->second.c_str());
-	StringCchCopy(szPath2, SIZEOF_ARRAY(szPath2), itr2->second.c_str());
+	StringCchCopy(szPath1, std::size(szPath1), itr1->second.c_str());
+	StringCchCopy(szPath2, std::size(szPath2), itr2->second.c_str());
 
 	PathRemoveFileSpec(szPath1);
 	PathRemoveFileSpec(szPath2);
@@ -560,69 +557,79 @@ int CALLBACK SearchDialog::SortResultsByPath(LPARAM lParam1, LPARAM lParam2)
 	return StrCmpLogicalW(szPath1, szPath2);
 }
 
-void SearchDialog::UpdateMenuEntries(PCIDLIST_ABSOLUTE pidlParent,
-	const std::vector<PITEMID_CHILD> &pidlItems, DWORD_PTR dwData, IContextMenu *contextMenu,
-	HMENU hMenu)
+void SearchDialog::UpdateMenuEntries(HMENU menu, PCIDLIST_ABSOLUTE pidlParent,
+	const std::vector<PidlChild> &pidlItems, IContextMenu *contextMenu)
 {
-	UNREFERENCED_PARAMETER(dwData);
 	UNREFERENCED_PARAMETER(contextMenu);
 
-	unique_pidl_absolute pidlComplete(ILCombine(pidlParent, pidlItems.front()));
+	unique_pidl_absolute pidlComplete(ILCombine(pidlParent, pidlItems[0].Raw()));
 	SFGAOF itemAttributes = SFGAO_FOLDER;
 	GetItemAttributes(pidlComplete.get(), &itemAttributes);
 
-	TCHAR szTemp[64];
+	std::wstring openLocationText;
 
 	if ((itemAttributes & SFGAO_FOLDER) == SFGAO_FOLDER)
 	{
-		LoadString(GetResourceInstance(), IDS_SEARCH_OPEN_FOLDER_LOCATION, szTemp,
-			SIZEOF_ARRAY(szTemp));
+		openLocationText =
+			ResourceHelper::LoadString(GetResourceInstance(), IDS_SEARCH_OPEN_FOLDER_LOCATION);
 	}
 	else
 	{
-		LoadString(GetResourceInstance(), IDS_SEARCH_OPEN_FILE_LOCATION, szTemp,
-			SIZEOF_ARRAY(szTemp));
+		openLocationText =
+			ResourceHelper::LoadString(GetResourceInstance(), IDS_SEARCH_OPEN_FILE_LOCATION);
 	}
 
 	MENUITEMINFO mii;
 	mii.cbSize = sizeof(MENUITEMINFO);
 	mii.fMask = MIIM_STRING | MIIM_ID;
-	mii.wID = MENU_ID_OPEN_FILE_LOCATION;
-	mii.dwTypeData = szTemp;
-	InsertMenuItem(hMenu, 1, TRUE, &mii);
+	mii.wID = OPEN_FILE_LOCATION_MENU_ITEM_ID;
+	mii.dwTypeData = openLocationText.data();
+	InsertMenuItem(menu, 1, TRUE, &mii);
 }
 
-BOOL SearchDialog::HandleShellMenuItem(PCIDLIST_ABSOLUTE pidlParent,
-	const std::vector<PITEMID_CHILD> &pidlItems, DWORD_PTR dwData, const TCHAR *szCmd)
+std::wstring SearchDialog::GetHelpTextForItem(UINT menuItemId)
 {
-	UNREFERENCED_PARAMETER(dwData);
-
-	if (StrCmpI(szCmd, _T("open")) == 0)
+	switch (menuItemId)
 	{
-		for (auto pidlItem : pidlItems)
+	case OPEN_FILE_LOCATION_MENU_ITEM_ID:
+		return ResourceHelper::LoadString(m_coreInterface->GetResourceInstance(),
+			IDS_SEARCH_OPEN_ITEM_LOCATION_HELP_TEXT);
+
+	default:
+		DCHECK(false);
+		return L"";
+	}
+}
+
+bool SearchDialog::HandleShellMenuItem(PCIDLIST_ABSOLUTE pidlParent,
+	const std::vector<PidlChild> &pidlItems, const std::wstring &verb)
+{
+	if (verb == L"open")
+	{
+		for (const auto &pidlItem : pidlItems)
 		{
-			unique_pidl_absolute pidlComplete(ILCombine(pidlParent, pidlItem));
-			m_navigator->OpenItem(pidlComplete.get());
+			unique_pidl_absolute pidlComplete(ILCombine(pidlParent, pidlItem.Raw()));
+			m_browserWindow->OpenItem(pidlComplete.get());
 		}
 
-		return TRUE;
+		return true;
 	}
 
-	return FALSE;
+	return false;
 }
 
 void SearchDialog::HandleCustomMenuItem(PCIDLIST_ABSOLUTE pidlParent,
-	const std::vector<PITEMID_CHILD> &pidlItems, int iCmd)
+	const std::vector<PidlChild> &pidlItems, UINT menuItemId)
 {
-	switch (iCmd)
+	switch (menuItemId)
 	{
-	case MENU_ID_OPEN_FILE_LOCATION:
+	case OPEN_FILE_LOCATION_MENU_ITEM_ID:
 	{
 		auto navigateParams = NavigateParams::Normal(pidlParent);
-		m_tabContainer->CreateNewTab(navigateParams, TabSettings(_selected = true));
+		m_tabContainerImpl->CreateNewTab(navigateParams, TabSettings(_selected = true));
 
-		unique_pidl_absolute pidlComplete(ILCombine(pidlParent, pidlItems.front()));
-		m_coreInterface->GetActiveShellBrowser()->SelectItems({ pidlComplete.get() });
+		unique_pidl_absolute pidlComplete(ILCombine(pidlParent, pidlItems[0].Raw()));
+		m_coreInterface->GetActiveShellBrowserImpl()->SelectItems({ pidlComplete.get() });
 	}
 	break;
 	}
@@ -651,18 +658,9 @@ INT_PTR SearchDialog::OnNotify(NMHDR *pnmhdr)
 				if (bRet)
 				{
 					auto itr = m_SearchItemsMapInternal.find(static_cast<int>(lvItem.lParam));
+					CHECK(itr != m_SearchItemsMapInternal.end());
 
-					/* Item should always exist. */
-					assert(itr != m_SearchItemsMapInternal.end());
-
-					unique_pidl_absolute pidlFull;
-					HRESULT hr = SHParseDisplayName(itr->second.c_str(), nullptr,
-						wil::out_param(pidlFull), 0, nullptr);
-
-					if (hr == S_OK)
-					{
-						m_navigator->OpenItem(pidlFull.get());
-					}
+					m_browserWindow->OpenItem(itr->second.c_str());
 				}
 			}
 		}
@@ -674,7 +672,7 @@ INT_PTR SearchDialog::OnNotify(NMHDR *pnmhdr)
 		{
 			auto pnmlink = reinterpret_cast<PNMLINK>(pnmhdr);
 
-			ShellExecute(nullptr, L"open", pnmlink->item.szUrl, nullptr, nullptr, SW_SHOW);
+			ShellExecute(nullptr, L"open", pnmlink->item.szUrl, nullptr, nullptr, SW_SHOWNORMAL);
 		}
 	}
 	break;
@@ -697,7 +695,7 @@ INT_PTR SearchDialog::OnNotify(NMHDR *pnmhdr)
 				if (bRet)
 				{
 					auto itr = m_SearchItemsMapInternal.find(static_cast<int>(lvItem.lParam));
-					assert(itr != m_SearchItemsMapInternal.end());
+					CHECK(itr != m_SearchItemsMapInternal.end());
 
 					unique_pidl_absolute pidlFull;
 					HRESULT hr = SHParseDisplayName(itr->second.c_str(), nullptr,
@@ -719,7 +717,8 @@ INT_PTR SearchDialog::OnNotify(NMHDR *pnmhdr)
 						unique_pidl_absolute pidlDirectory(ILCloneFull(pidlFull.get()));
 						ILRemoveLastID(pidlDirectory.get());
 
-						FileContextMenuManager fcmm(m_hDlg, pidlDirectory.get(), pidlItems);
+						ShellContextMenu shellContextMenu(pidlDirectory.get(), pidlItems, this,
+							m_coreInterface->GetStatusBar());
 
 						DWORD dwCursorPos = GetMessagePos();
 
@@ -727,8 +726,14 @@ INT_PTR SearchDialog::OnNotify(NMHDR *pnmhdr)
 						ptCursor.x = GET_X_LPARAM(dwCursorPos);
 						ptCursor.y = GET_Y_LPARAM(dwCursorPos);
 
-						fcmm.ShowMenu(this, MIN_SHELL_MENU_ID, MAX_SHELL_MENU_ID, &ptCursor,
-							m_coreInterface->GetStatusBar(), NULL, FALSE, IsKeyDown(VK_SHIFT));
+						ShellContextMenu::Flags flags = ShellContextMenu::Flags::Standard;
+
+						if (IsKeyDown(VK_SHIFT))
+						{
+							WI_SetFlag(flags, ShellContextMenu::Flags::ExtendedVerbs);
+						}
+
+						shellContextMenu.ShowMenu(m_hDlg, &ptCursor, nullptr, flags);
 					}
 				}
 			}
@@ -801,16 +806,15 @@ INT_PTR SearchDialog::OnPrivateMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 			TCHAR szTemp[128];
 			LoadString(GetResourceInstance(), IDS_SEARCH_FINISHED_MESSAGE, szTemp,
-				SIZEOF_ARRAY(szTemp));
-			StringCchPrintf(szStatus, SIZEOF_ARRAY(szStatus), szTemp, iFoldersFound, iFilesFound);
+				std::size(szTemp));
+			StringCchPrintf(szStatus, std::size(szStatus), szTemp, iFoldersFound, iFilesFound);
 			SetDlgItemText(m_hDlg, IDC_STATIC_STATUS, szStatus);
 		}
 		else
 		{
-			TCHAR szTemp[128];
-			LoadString(GetResourceInstance(), IDS_SEARCH_CANCELLED_MESSAGE, szTemp,
-				SIZEOF_ARRAY(szTemp));
-			SetDlgItemText(m_hDlg, IDC_STATIC_STATUS, szTemp);
+			auto cancelledMessage =
+				ResourceHelper::LoadString(GetResourceInstance(), IDS_SEARCH_CANCELLED_MESSAGE);
+			SetDlgItemText(m_hDlg, IDC_STATIC_STATUS, cancelledMessage.c_str());
 		}
 
 		assert(m_pSearch != nullptr);
@@ -832,8 +836,8 @@ INT_PTR SearchDialog::OnPrivateMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
 		pszDirectory = reinterpret_cast<TCHAR *>(wParam);
 
 		TCHAR szTemp[64];
-		LoadString(GetResourceInstance(), IDS_SEARCHING, szTemp, SIZEOF_ARRAY(szTemp));
-		StringCchPrintf(szStatus, SIZEOF_ARRAY(szStatus), szTemp, pszDirectory);
+		LoadString(GetResourceInstance(), IDS_SEARCHING, szTemp, std::size(szTemp));
+		StringCchPrintf(szStatus, std::size(szStatus), szTemp, pszDirectory);
 		SetDlgItemText(m_hDlg, IDC_STATIC_STATUS, szStatus);
 	}
 	break;
@@ -848,10 +852,9 @@ INT_PTR SearchDialog::OnPrivateMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 		/* The regular expression passed to the search
 		thread was invalid. Show the user an error message. */
-		TCHAR szTemp[128];
-		LoadString(GetResourceInstance(), IDS_SEARCH_REGULAR_EXPRESSION_INVALID, szTemp,
-			SIZEOF_ARRAY(szTemp));
-		SetDlgItemText(m_hDlg, IDC_LINK_STATUS, szTemp);
+		auto errorMessage = ResourceHelper::LoadString(GetResourceInstance(),
+			IDS_SEARCH_REGULAR_EXPRESSION_INVALID);
+		SetDlgItemText(m_hDlg, IDC_LINK_STATUS, errorMessage.c_str());
 
 		assert(m_pSearch != nullptr);
 
@@ -879,7 +882,7 @@ INT_PTR SearchDialog::OnTimer(int iTimerID)
 	int nListViewItems = ListView_GetItemCount(hListView);
 
 	int nItems =
-		min(static_cast<int>(m_AwaitingSearchItems.size()), SEARCH_MAX_ITEMS_BATCH_PROCESS);
+		std::min(static_cast<int>(m_AwaitingSearchItems.size()), SEARCH_MAX_ITEMS_BATCH_PROCESS);
 	int i = 0;
 
 	auto itr = m_AwaitingSearchItems.begin();
@@ -896,7 +899,7 @@ INT_PTR SearchDialog::OnTimer(int iTimerID)
 		GetDisplayName(pidl, SHGDN_FORPARSING, fullFileName);
 
 		TCHAR directory[MAX_PATH];
-		StringCchCopy(directory, SIZEOF_ARRAY(directory), fullFileName.c_str());
+		StringCchCopy(directory, std::size(directory), fullFileName.c_str());
 		PathRemoveFileSpec(directory);
 
 		std::wstring fileName;
@@ -962,8 +965,8 @@ Search::Search(HWND hDlg, TCHAR *szBaseDirectory, TCHAR *szPattern, DWORD dwAttr
 	m_bCaseInsensitive = bCaseInsensitive;
 	m_bSearchSubFolders = bSearchSubFolders;
 
-	StringCchCopy(m_szBaseDirectory, SIZEOF_ARRAY(m_szBaseDirectory), szBaseDirectory);
-	StringCchCopy(m_szSearchPattern, SIZEOF_ARRAY(m_szSearchPattern), szPattern);
+	StringCchCopy(m_szBaseDirectory, std::size(m_szBaseDirectory), szBaseDirectory);
+	StringCchCopy(m_szSearchPattern, std::size(m_szSearchPattern), szPattern);
 
 	InitializeCriticalSection(&m_csStop);
 	m_bStopSearching = FALSE;
@@ -979,7 +982,7 @@ void Search::StartSearching()
 	m_iFoldersFound = 0;
 	m_iFilesFound = 0;
 
-	if (lstrcmp(m_szSearchPattern, EMPTY_STRING) != 0 && m_bUseRegularExpressions)
+	if (lstrlen(m_szSearchPattern) != 0 && m_bUseRegularExpressions)
 	{
 		try
 		{
@@ -1066,7 +1069,7 @@ void Search::SearchDirectoryInternal(const TCHAR *szSearchDirectory,
 				BOOL bMatchAttributes = FALSE;
 
 				/* Only match against the filename if it's not empty. */
-				if (lstrcmp(m_szSearchPattern, EMPTY_STRING) != 0)
+				if (lstrlen(m_szSearchPattern) != 0)
 				{
 					if (m_bUseRegularExpressions)
 					{
@@ -1282,51 +1285,50 @@ void SearchDialogPersistentSettings::LoadExtraRegistrySettings(HKEY hKey)
 void SearchDialogPersistentSettings::SaveExtraXMLSettings(IXMLDOMDocument *pXMLDom,
 	IXMLDOMElement *pParentNode)
 {
-	NXMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_COLUMN_WIDTH_1,
-		NXMLSettings::EncodeIntValue(m_iColumnWidth1));
-	NXMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_COLUMN_WIDTH_2,
-		NXMLSettings::EncodeIntValue(m_iColumnWidth2));
-	NXMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_SEARCH_DIRECTORY_TEXT,
+	XMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_COLUMN_WIDTH_1,
+		XMLSettings::EncodeIntValue(m_iColumnWidth1));
+	XMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_COLUMN_WIDTH_2,
+		XMLSettings::EncodeIntValue(m_iColumnWidth2));
+	XMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_SEARCH_DIRECTORY_TEXT,
 		m_searchPattern.c_str());
-	NXMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_SEARCH_SUB_FOLDERS,
-		NXMLSettings::EncodeBoolValue(m_bSearchSubFolders));
-	NXMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_USE_REGULAR_EXPRESSIONS,
-		NXMLSettings::EncodeBoolValue(m_bUseRegularExpressions));
-	NXMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_CASE_INSENSITIVE,
-		NXMLSettings::EncodeBoolValue(m_bCaseInsensitive));
-	NXMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_ARCHIVE,
-		NXMLSettings::EncodeBoolValue(m_bArchive));
-	NXMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_HIDDEN,
-		NXMLSettings::EncodeBoolValue(m_bHidden));
-	NXMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_READ_ONLY,
-		NXMLSettings::EncodeBoolValue(m_bReadOnly));
-	NXMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_SYSTEM,
-		NXMLSettings::EncodeBoolValue(m_bSystem));
-	NXMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_SORT_MODE,
-		NXMLSettings::EncodeIntValue(static_cast<int>(m_SortMode)));
-	NXMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_SORT_ASCENDING,
-		NXMLSettings::EncodeBoolValue(m_bSortAscending));
+	XMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_SEARCH_SUB_FOLDERS,
+		XMLSettings::EncodeBoolValue(m_bSearchSubFolders));
+	XMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_USE_REGULAR_EXPRESSIONS,
+		XMLSettings::EncodeBoolValue(m_bUseRegularExpressions));
+	XMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_CASE_INSENSITIVE,
+		XMLSettings::EncodeBoolValue(m_bCaseInsensitive));
+	XMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_ARCHIVE,
+		XMLSettings::EncodeBoolValue(m_bArchive));
+	XMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_HIDDEN,
+		XMLSettings::EncodeBoolValue(m_bHidden));
+	XMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_READ_ONLY,
+		XMLSettings::EncodeBoolValue(m_bReadOnly));
+	XMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_SYSTEM,
+		XMLSettings::EncodeBoolValue(m_bSystem));
+	XMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_SORT_MODE,
+		XMLSettings::EncodeIntValue(static_cast<int>(m_SortMode)));
+	XMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_SORT_ASCENDING,
+		XMLSettings::EncodeBoolValue(m_bSortAscending));
 
 	std::list<std::wstring> searchDirectoriesList;
 	CircularBufferToList(m_searchDirectories, searchDirectoriesList);
-	NXMLSettings::AddStringListToNode(pXMLDom, pParentNode, SETTING_DIRECTORY_LIST,
+	XMLSettings::AddStringListToNode(pXMLDom, pParentNode, SETTING_DIRECTORY_LIST,
 		searchDirectoriesList);
 
 	std::list<std::wstring> searchPatternList;
 	CircularBufferToList(m_searchPatterns, searchPatternList);
-	NXMLSettings::AddStringListToNode(pXMLDom, pParentNode, SETTING_PATTERN_LIST,
-		searchPatternList);
+	XMLSettings::AddStringListToNode(pXMLDom, pParentNode, SETTING_PATTERN_LIST, searchPatternList);
 }
 
 void SearchDialogPersistentSettings::LoadExtraXMLSettings(BSTR bstrName, BSTR bstrValue)
 {
 	if (lstrcmpi(bstrName, SETTING_COLUMN_WIDTH_1) == 0)
 	{
-		m_iColumnWidth1 = NXMLSettings::DecodeIntValue(bstrValue);
+		m_iColumnWidth1 = XMLSettings::DecodeIntValue(bstrValue);
 	}
 	else if (lstrcmpi(bstrName, SETTING_COLUMN_WIDTH_2) == 0)
 	{
-		m_iColumnWidth2 = NXMLSettings::DecodeIntValue(bstrValue);
+		m_iColumnWidth2 = XMLSettings::DecodeIntValue(bstrValue);
 	}
 	else if (lstrcmpi(bstrName, SETTING_SEARCH_DIRECTORY_TEXT) == 0)
 	{
@@ -1334,39 +1336,39 @@ void SearchDialogPersistentSettings::LoadExtraXMLSettings(BSTR bstrName, BSTR bs
 	}
 	else if (lstrcmpi(bstrName, SETTING_SEARCH_SUB_FOLDERS) == 0)
 	{
-		m_bSearchSubFolders = NXMLSettings::DecodeBoolValue(bstrValue);
+		m_bSearchSubFolders = XMLSettings::DecodeBoolValue(bstrValue);
 	}
 	else if (lstrcmpi(bstrName, SETTING_USE_REGULAR_EXPRESSIONS) == 0)
 	{
-		m_bUseRegularExpressions = NXMLSettings::DecodeBoolValue(bstrValue);
+		m_bUseRegularExpressions = XMLSettings::DecodeBoolValue(bstrValue);
 	}
 	else if (lstrcmpi(bstrName, SETTING_CASE_INSENSITIVE) == 0)
 	{
-		m_bCaseInsensitive = NXMLSettings::DecodeBoolValue(bstrValue);
+		m_bCaseInsensitive = XMLSettings::DecodeBoolValue(bstrValue);
 	}
 	else if (lstrcmpi(bstrName, SETTING_ARCHIVE) == 0)
 	{
-		m_bArchive = NXMLSettings::DecodeBoolValue(bstrValue);
+		m_bArchive = XMLSettings::DecodeBoolValue(bstrValue);
 	}
 	else if (lstrcmpi(bstrName, SETTING_HIDDEN) == 0)
 	{
-		m_bHidden = NXMLSettings::DecodeBoolValue(bstrValue);
+		m_bHidden = XMLSettings::DecodeBoolValue(bstrValue);
 	}
 	else if (lstrcmpi(bstrName, SETTING_READ_ONLY) == 0)
 	{
-		m_bReadOnly = NXMLSettings::DecodeBoolValue(bstrValue);
+		m_bReadOnly = XMLSettings::DecodeBoolValue(bstrValue);
 	}
 	else if (lstrcmpi(bstrName, SETTING_SYSTEM) == 0)
 	{
-		m_bSystem = NXMLSettings::DecodeBoolValue(bstrValue);
+		m_bSystem = XMLSettings::DecodeBoolValue(bstrValue);
 	}
 	else if (lstrcmpi(bstrName, SETTING_SORT_MODE) == 0)
 	{
-		m_SortMode = static_cast<SortMode>(NXMLSettings::DecodeIntValue(bstrValue));
+		m_SortMode = static_cast<SortMode>(XMLSettings::DecodeIntValue(bstrValue));
 	}
 	else if (lstrcmpi(bstrName, SETTING_SORT_ASCENDING) == 0)
 	{
-		m_bSortAscending = NXMLSettings::DecodeBoolValue(bstrValue);
+		m_bSortAscending = XMLSettings::DecodeBoolValue(bstrValue);
 	}
 	else if (CompareString(LOCALE_INVARIANT, NORM_IGNORECASE, bstrName,
 				 lstrlen(SETTING_DIRECTORY_LIST), SETTING_DIRECTORY_LIST,

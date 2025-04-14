@@ -4,25 +4,32 @@
 
 #include "stdafx.h"
 #include "Bookmarks/UI/BookmarksMainMenu.h"
+#include "AcceleratorHelper.h"
+#include "App.h"
 #include "Bookmarks/BookmarkHelper.h"
 #include "Bookmarks/BookmarkTree.h"
+#include "BrowserWindow.h"
 #include "CoreInterface.h"
 #include "MainResource.h"
 #include "ResourceHelper.h"
-#include "ShellBrowser/ShellBrowser.h"
+#include "ShellBrowser/ShellBrowserImpl.h"
 #include "ShellBrowser/ShellNavigationController.h"
-#include "TabContainer.h"
+#include "TabContainerImpl.h"
 #include "../Helper/DpiCompatibility.h"
 #include "../Helper/MenuHelper.h"
 
-BookmarksMainMenu::BookmarksMainMenu(CoreInterface *coreInterface, Navigator *navigator,
-	IconFetcher *iconFetcher, BookmarkTree *bookmarkTree, const MenuIdRange &menuIdRange) :
+BookmarksMainMenu::BookmarksMainMenu(App *app, BrowserWindow *browserWindow,
+	CoreInterface *coreInterface, const IconResourceLoader *iconResourceLoader,
+	IconFetcher *iconFetcher, ThemeManager *themeManager, BookmarkTree *bookmarkTree,
+	const BookmarkMenuBuilder::MenuIdRange &menuIdRange) :
+	m_app(app),
 	m_coreInterface(coreInterface),
-	m_navigator(navigator),
+	m_iconResourceLoader(iconResourceLoader),
 	m_bookmarkTree(bookmarkTree),
 	m_menuIdRange(menuIdRange),
-	m_menuBuilder(coreInterface, iconFetcher, coreInterface->GetResourceInstance()),
-	m_controller(bookmarkTree, coreInterface, navigator, coreInterface->GetMainWindow())
+	m_menuBuilder(iconResourceLoader, iconFetcher, coreInterface->GetResourceInstance()),
+	m_controller(bookmarkTree, browserWindow, coreInterface, iconResourceLoader,
+		coreInterface->GetMainWindow(), themeManager)
 {
 	m_connections.push_back(coreInterface->AddMainMenuPreShowObserver(
 		std::bind_front(&BookmarksMainMenu::OnMainMenuPreShow, this)));
@@ -47,6 +54,7 @@ void BookmarksMainMenu::OnMainMenuPreShow(HMENU mainMenu)
 {
 	std::vector<wil::unique_hbitmap> menuImages;
 	BookmarkMenuBuilder::MenuInfo menuInfo;
+	menuInfo.nextMenuId = m_menuIdRange.startId;
 	auto bookmarksMenu = BuildMainBookmarksMenu(menuImages, menuInfo);
 
 	MENUITEMINFO mii;
@@ -72,7 +80,7 @@ wil::unique_hmenu BookmarksMainMenu::BuildMainBookmarksMenu(
 	MenuHelper::AddStringItem(menu.get(), IDM_BOOKMARKS_BOOKMARKTHISTAB, bookmarkThisTabText, 0,
 		TRUE);
 	ResourceHelper::SetMenuItemImage(menu.get(), IDM_BOOKMARKS_BOOKMARKTHISTAB,
-		m_coreInterface->GetIconResourceLoader(), Icon::AddBookmark, dpi, menuImages);
+		m_iconResourceLoader, Icon::AddBookmark, dpi, menuImages);
 
 	std::wstring bookmarkAllTabsText = ResourceHelper::LoadString(
 		m_coreInterface->GetResourceInstance(), IDS_MENU_BOOKMARK_ALL_TABS);
@@ -84,19 +92,21 @@ wil::unique_hmenu BookmarksMainMenu::BuildMainBookmarksMenu(
 	MenuHelper::AddStringItem(menu.get(), IDM_BOOKMARKS_MANAGEBOOKMARKS, manageBookmarksText, 2,
 		TRUE);
 	ResourceHelper::SetMenuItemImage(menu.get(), IDM_BOOKMARKS_MANAGEBOOKMARKS,
-		m_coreInterface->GetIconResourceLoader(), Icon::Bookmarks, dpi, menuImages);
+		m_iconResourceLoader, Icon::Bookmarks, dpi, menuImages);
 
 	AddBookmarkItemsToMenu(menu.get(), m_menuIdRange, GetMenuItemCount(menu.get()), menuImages,
 		menuInfo);
 	AddOtherBookmarksToMenu(menu.get(), { menuInfo.nextMenuId, m_menuIdRange.endId },
 		GetMenuItemCount(menu.get()), menuImages, menuInfo);
 
+	UpdateMenuAcceleratorStrings(menu.get(), m_app->GetAcceleratorManager());
+
 	return menu;
 }
 
-void BookmarksMainMenu::AddBookmarkItemsToMenu(HMENU menu, const MenuIdRange &menuIdRange,
-	int position, std::vector<wil::unique_hbitmap> &menuImages,
-	BookmarkMenuBuilder::MenuInfo &menuInfo)
+void BookmarksMainMenu::AddBookmarkItemsToMenu(HMENU menu,
+	const BookmarkMenuBuilder::MenuIdRange &menuIdRange, int position,
+	std::vector<wil::unique_hbitmap> &menuImages, BookmarkMenuBuilder::MenuInfo &menuInfo)
 {
 	BookmarkItem *bookmarksMenuFolder = m_bookmarkTree->GetBookmarksMenuFolder();
 
@@ -111,9 +121,9 @@ void BookmarksMainMenu::AddBookmarkItemsToMenu(HMENU menu, const MenuIdRange &me
 		menuIdRange, position, menuImages, menuInfo);
 }
 
-void BookmarksMainMenu::AddOtherBookmarksToMenu(HMENU menu, const MenuIdRange &menuIdRange,
-	int position, std::vector<wil::unique_hbitmap> &menuImages,
-	BookmarkMenuBuilder::MenuInfo &menuInfo)
+void BookmarksMainMenu::AddOtherBookmarksToMenu(HMENU menu,
+	const BookmarkMenuBuilder::MenuIdRange &menuIdRange, int position,
+	std::vector<wil::unique_hbitmap> &menuImages, BookmarkMenuBuilder::MenuInfo &menuInfo)
 {
 	BookmarkItem *otherBookmarksFolder = m_bookmarkTree->GetOtherBookmarksFolder();
 
@@ -129,13 +139,16 @@ void BookmarksMainMenu::AddOtherBookmarksToMenu(HMENU menu, const MenuIdRange &m
 	m_menuBuilder.BuildMenu(m_coreInterface->GetMainWindow(), subMenu.get(), otherBookmarksFolder,
 		menuIdRange, 0, menuImages, menuInfo);
 
-	std::wstring otherBookmarksName = otherBookmarksFolder->GetName();
-	MenuHelper::AddSubMenuItem(menu, otherBookmarksName, std::move(subMenu), position++, TRUE);
+	auto otherBookmarksId = menuInfo.nextMenuId++;
+	MenuHelper::AddSubMenuItem(menu, otherBookmarksId, otherBookmarksFolder->GetName(),
+		std::move(subMenu), position++, TRUE);
+	menuInfo.itemIdMap.insert({ otherBookmarksId,
+		{ otherBookmarksFolder, BookmarkMenuBuilder::MenuItemType::BookmarkItem } });
 }
 
-std::optional<std::wstring> BookmarksMainMenu::MaybeGetMenuItemHelperText(HMENU menu, int id)
+std::optional<std::wstring> BookmarksMainMenu::MaybeGetMenuItemHelperText(HMENU menu, UINT id)
 {
-	if (!m_menuInfo.menus.contains(menu))
+	if (!MenuHelper::IsPartOfMenu(m_bookmarksMenu.get(), menu))
 	{
 		return std::nullopt;
 	}
@@ -147,11 +160,11 @@ std::optional<std::wstring> BookmarksMainMenu::MaybeGetMenuItemHelperText(HMENU 
 		return std::nullopt;
 	}
 
-	const BookmarkItem *bookmark = itr->second;
+	const BookmarkItem *bookmark = itr->second.bookmarkItem;
 	return bookmark->GetLocation();
 }
 
-void BookmarksMainMenu::OnMenuItemClicked(int menuItemId)
+void BookmarksMainMenu::OnMenuItemClicked(UINT menuItemId)
 {
 	auto itr = m_menuInfo.itemIdMap.find(menuItemId);
 
@@ -160,49 +173,29 @@ void BookmarksMainMenu::OnMenuItemClicked(int menuItemId)
 		return;
 	}
 
-	m_controller.OnMenuItemSelected(itr->second, IsKeyDown(VK_CONTROL), IsKeyDown(VK_SHIFT));
+	m_controller.OnMenuItemSelected(itr->second.bookmarkItem, IsKeyDown(VK_CONTROL),
+		IsKeyDown(VK_SHIFT));
 }
 
 bool BookmarksMainMenu::OnMenuItemMiddleClicked(const POINT &pt, bool isCtrlKeyDown,
 	bool isShiftKeyDown)
 {
-	HMENU targetMenu = nullptr;
-	int targetItem = -1;
-	bool targetFound = false;
+	auto menuItemId = MenuHelper::MaybeGetMenuItemAtPoint(m_bookmarksMenu.get(), pt);
 
-	for (auto menu : m_menuInfo.menus)
-	{
-		int item = MenuItemFromPoint(m_coreInterface->GetMainWindow(), menu, pt);
-
-		// Although the documentation for MenuItemFromPoint() states that it returns -1 if there's
-		// no menu item at the specified position, it appears the method will also return other
-		// negative values on failure. So, it's better to check whether the return value is
-		// positive, rather than checking whether it's equal to -1.
-		if (item >= 0)
-		{
-			targetMenu = menu;
-			targetItem = item;
-			targetFound = true;
-			break;
-		}
-	}
-
-	if (!targetFound)
+	if (!menuItemId)
 	{
 		return false;
 	}
 
-	auto itr = m_menuInfo.itemPositionMap.find({ targetMenu, targetItem });
+	auto itr = m_menuInfo.itemIdMap.find(*menuItemId);
 
-	if (itr == m_menuInfo.itemPositionMap.end())
+	if (itr == m_menuInfo.itemIdMap.end())
 	{
-		// This branch will be taken if one of the other, non-bookmark, items on this menu is
-		// clicked. In that case, there's nothing that needs to happen and there's no need for other
-		// handlers to try and process this event.
+		// The item can be one of the other existing (non-bookmark) menu items.
 		return true;
 	}
 
-	if (itr->second.menuItemType == BookmarkMenuBuilder::MenuItemType::EmptyItem)
+	if (!MenuHelper::IsMenuItemEnabled(m_bookmarksMenu.get(), *menuItemId, false))
 	{
 		return true;
 	}
@@ -214,14 +207,15 @@ bool BookmarksMainMenu::OnMenuItemMiddleClicked(const POINT &pt, bool isCtrlKeyD
 
 bool BookmarksMainMenu::OnMenuItemRightClicked(HMENU menu, int index, const POINT &pt)
 {
-	if (!m_menuInfo.menus.contains(menu))
+	if (!MenuHelper::IsPartOfMenu(m_bookmarksMenu.get(), menu))
 	{
 		return false;
 	}
 
-	auto itr = m_menuInfo.itemPositionMap.find({ menu, index });
+	auto menuItemId = MenuHelper::GetMenuItemIDIncludingSubmenu(menu, index);
+	auto itr = m_menuInfo.itemIdMap.find(menuItemId);
 
-	if (itr == m_menuInfo.itemPositionMap.end())
+	if (itr == m_menuInfo.itemIdMap.end())
 	{
 		// It's valid for the item not to be found, as the bookmarks menu contains several existing
 		// menu items and this class only manages the actual bookmark items on the menu.

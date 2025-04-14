@@ -8,25 +8,42 @@
 #include "ShellBrowser/HistoryEntry.h"
 #include "SignalWrapper.h"
 #include "../Helper/BaseWindow.h"
-#include "../Helper/WindowSubclassWrapper.h"
-#include <wil/resource.h>
-#include <optional>
+#include "../Helper/ScopedStopSource.h"
+#include "../Helper/WeakPtr.h"
+#include "../Helper/WeakPtrFactory.h"
+#include "../Helper/WindowSubclass.h"
+#include <concurrencpp/concurrencpp.h>
+#include <memory>
 
+class App;
+class AsyncIconFetcher;
+class BrowserWindow;
 class CoreInterface;
-struct NavigateParams;
-class Navigator;
+class NavigationRequest;
+class Runtime;
+class ShellBrowser;
 class Tab;
 
 class AddressBar : public BaseWindow
 {
 public:
-	static AddressBar *Create(HWND parent, CoreInterface *coreInterface, Navigator *navigator);
+	static AddressBar *Create(HWND parent, App *app, BrowserWindow *browserWindow,
+		CoreInterface *coreInterface);
 
 	// Signals
 	SignalWrapper<AddressBar, void()> sizeUpdatedSignal;
 
 private:
-	AddressBar(HWND parent, CoreInterface *coreInterface, Navigator *navigator);
+	enum class IconUpdateType
+	{
+		// Indicates that the icon will be fetched only if there is no cached icon available.
+		FetchIfNotCached,
+
+		// Always fetches the icon, regardless of whether a cached icon is available or not.
+		AlwaysFetch
+	};
+
+	AddressBar(HWND parent, App *app, BrowserWindow *browserWindow, CoreInterface *coreInterface);
 	~AddressBar() = default;
 
 	static HWND CreateAddressBar(HWND parent);
@@ -40,23 +57,29 @@ private:
 	void OnEscapePressed();
 	void OnBeginDrag();
 	void OnTabSelected(const Tab &tab);
-	void OnNavigationCommitted(const Tab &tab, const NavigateParams &navigateParams);
-	void UpdateTextAndIcon(const Tab &tab);
+	void OnNavigationCommitted(const NavigationRequest *request);
+	void OnDirectoryPropertiesChanged(const ShellBrowser *shellBrowser);
+	void UpdateTextAndIcon(const Tab &tab,
+		IconUpdateType iconUpdateType = IconUpdateType::FetchIfNotCached);
+	static concurrencpp::null_result RetrieveUpdatedIcon(WeakPtr<AddressBar> self,
+		PidlAbsolute pidl, std::shared_ptr<AsyncIconFetcher> iconFetcher, Runtime *runtime,
+		std::stop_token stopToken);
 	void UpdateTextAndIconInUI(std::wstring *text, int iconIndex);
 	void RevertTextInUI();
-	void OnHistoryEntryUpdated(const HistoryEntry &entry, HistoryEntry::PropertyType propertyType);
 	void OnFontOrDpiUpdated();
 
-	CoreInterface *m_coreInterface;
-	Navigator *m_navigator;
+	App *const m_app;
+	BrowserWindow *const m_browserWindow;
+	CoreInterface *const m_coreInterface;
 
 	MainFontSetter m_fontSetter;
 
-	boost::signals2::scoped_connection m_historyEntryUpdatedConnection;
-	int m_defaultFolderIconIndex;
-
 	std::wstring m_currentText;
 
-	std::vector<std::unique_ptr<WindowSubclassWrapper>> m_windowSubclasses;
+	std::vector<std::unique_ptr<WindowSubclass>> m_windowSubclasses;
 	std::vector<boost::signals2::scoped_connection> m_connections;
+
+	std::unique_ptr<ScopedStopSource> m_scopedStopSource;
+
+	WeakPtrFactory<AddressBar> m_weakPtrFactory;
 };

@@ -30,26 +30,32 @@ struct FolderColumns
 			std::end(NETWORK_CONNECTIONS_DEFAULT_COLUMNS));
 	std::vector<Column_t> myNetworkPlacesColumns = std::vector<Column_t>(
 		std::begin(MY_NETWORK_PLACES_DEFAULT_COLUMNS), std::end(MY_NETWORK_PLACES_DEFAULT_COLUMNS));
+
+	// This is only used in tests.
+	bool operator==(const FolderColumns &) const = default;
 };
 
 struct GlobalFolderSettings
 {
-	BOOL showExtensions = TRUE;
-	BOOL showFriendlyDates = TRUE;
-	BOOL showFolderSizes = FALSE;
-	BOOL disableFolderSizesNetworkRemovable = FALSE;
-	BOOL hideSystemFiles = FALSE;
-	BOOL hideLinkExtension = FALSE;
-	BOOL insertSorted = TRUE;
-	ValueWrapper<BOOL> showGridlines = TRUE;
-	BOOL forceSize = FALSE;
+	bool showExtensions = true;
+	bool showFriendlyDates = true;
+	bool showFolderSizes = false;
+	bool disableFolderSizesNetworkRemovable = false;
+	bool hideSystemFiles = false;
+	bool hideLinkExtension = false;
+	bool insertSorted = true;
+	ValueWrapper<bool> showGridlines = true;
+	bool forceSize = false;
 	SizeDisplayFormat sizeDisplayFormat = SizeDisplayFormat::Bytes;
-	ValueWrapper<BOOL> oneClickActivate = FALSE;
+	ValueWrapper<bool> oneClickActivate = false;
 	ValueWrapper<UINT> oneClickActivateHoverTime = DEFAULT_LISTVIEW_HOVER_TIME;
-	BOOL displayMixedFilesAndFolders = FALSE;
-	BOOL useNaturalSortOrder = TRUE;
+	bool displayMixedFilesAndFolders = false;
+	bool useNaturalSortOrder = true;
 
 	FolderColumns folderColumns;
+
+	// This is only used in tests.
+	bool operator==(const GlobalFolderSettings &) const = default;
 };
 
 struct FolderSettings
@@ -66,4 +72,7 @@ struct FolderSettings
 	bool applyFilter = false;
 	bool filterCaseSensitive = false;
 	std::wstring filter;
+
+	// This is only used in tests.
+	bool operator==(const FolderSettings &) const = default;
 };

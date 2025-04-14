@@ -4,49 +4,48 @@
 
 #include "stdafx.h"
 #include "MainWindow.h"
+#include "App.h"
 #include "Config.h"
 #include "CoreInterface.h"
-#include "Explorer++_internal.h"
 #include "MainResource.h"
-#include "ShellBrowser/ShellBrowser.h"
-#include "TabContainer.h"
+#include "ResourceHelper.h"
+#include "ShellBrowser/ShellBrowserImpl.h"
+#include "TabContainerImpl.h"
 #include "../Helper/Helper.h"
 #include "../Helper/ProcessHelper.h"
-#include "../Helper/WindowSubclassWrapper.h"
+#include "../Helper/WindowSubclass.h"
 #include <wil/resource.h>
 
-MainWindow *MainWindow::Create(HWND hwnd, std::shared_ptr<Config> config,
-	HINSTANCE resourceInstance, CoreInterface *coreInterface)
+MainWindow *MainWindow::Create(HWND hwnd, App *app, BrowserWindow *browser,
+	CoreInterface *coreInterface)
 {
-	return new MainWindow(hwnd, config, resourceInstance, coreInterface);
+	return new MainWindow(hwnd, app, browser, coreInterface);
 }
 
-MainWindow::MainWindow(HWND hwnd, std::shared_ptr<Config> config, HINSTANCE resourceInstance,
-	CoreInterface *coreInterface) :
+MainWindow::MainWindow(HWND hwnd, App *app, BrowserWindow *browser, CoreInterface *coreInterface) :
 	m_hwnd(hwnd),
-	m_config(config),
-	m_resourceInstance(resourceInstance),
+	m_app(app),
 	m_coreInterface(coreInterface)
 {
-	m_windowSubclasses.push_back(std::make_unique<WindowSubclassWrapper>(m_hwnd,
-		std::bind_front(&MainWindow::WndProc, this)));
+	m_windowSubclasses.push_back(
+		std::make_unique<WindowSubclass>(m_hwnd, std::bind_front(&MainWindow::WndProc, this)));
 
-	m_coreInterface->AddTabsInitializedObserver(
-		[this]
-		{
-			m_connections.push_back(
-				m_coreInterface->GetTabContainer()->tabSelectedSignal.AddObserver(
-					std::bind_front(&MainWindow::OnTabSelected, this)));
-			m_connections.push_back(
-				m_coreInterface->GetTabContainer()->tabNavigationCommittedSignal.AddObserver(
-					std::bind_front(&MainWindow::OnNavigationCommitted, this)));
-		});
+	m_connections.push_back(m_app->GetTabEvents()->AddSelectedObserver(
+		std::bind_front(&MainWindow::OnTabSelected, this), TabEventScope::ForBrowser(*browser)));
 
-	m_connections.push_back(m_config->showFullTitlePath.addObserver(
+	m_connections.push_back(m_app->GetShellBrowserEvents()->AddDirectoryPropertiesChangedObserver(
+		std::bind_front(&MainWindow::OnDirectoryPropertiesChanged, this),
+		NavigationEventScope::ForBrowser(*browser)));
+
+	m_connections.push_back(m_app->GetNavigationEvents()->AddCommittedObserver(
+		std::bind_front(&MainWindow::OnNavigationCommitted, this),
+		NavigationEventScope::ForBrowser(*browser)));
+
+	m_connections.push_back(m_app->GetConfig()->showFullTitlePath.addObserver(
 		std::bind_front(&MainWindow::OnShowFullTitlePathUpdated, this)));
-	m_connections.push_back(m_config->showUserNameInTitleBar.addObserver(
+	m_connections.push_back(m_app->GetConfig()->showUserNameInTitleBar.addObserver(
 		std::bind_front(&MainWindow::OnShowUserNameInTitleBarUpdated, this)));
-	m_connections.push_back(m_config->showPrivilegeLevelInTitleBar.addObserver(
+	m_connections.push_back(m_app->GetConfig()->showPrivilegeLevelInTitleBar.addObserver(
 		std::bind_front(&MainWindow::OnShowPrivilegeLevelInTitleBarUpdated, this)));
 
 	// The main window is registered as a drop target only so that the drag image will be
@@ -72,11 +71,21 @@ LRESULT MainWindow::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	return DefSubclassProc(hwnd, msg, wParam, lParam);
 }
 
-void MainWindow::OnNavigationCommitted(const Tab &tab, const NavigateParams &navigateParams)
+void MainWindow::OnNavigationCommitted(const NavigationRequest *request)
 {
-	UNREFERENCED_PARAMETER(navigateParams);
+	const auto *tab = request->GetShellBrowser()->GetTab();
 
-	if (m_coreInterface->GetTabContainer()->IsTabSelected(tab))
+	if (tab->GetTabContainer()->IsTabSelected(*tab))
+	{
+		UpdateWindowText();
+	}
+}
+
+void MainWindow::OnDirectoryPropertiesChanged(const ShellBrowser *shellBrowser)
+{
+	const auto *tab = shellBrowser->GetTab();
+
+	if (tab->GetTabContainer()->IsTabSelected(*tab))
 	{
 		UpdateWindowText();
 	}
@@ -112,14 +121,15 @@ void MainWindow::OnShowPrivilegeLevelInTitleBarUpdated(BOOL newValue)
 
 void MainWindow::UpdateWindowText()
 {
-	const Tab &tab = m_coreInterface->GetTabContainer()->GetSelectedTab();
-	auto pidlDirectory = tab.GetShellBrowser()->GetDirectoryIdl();
+	const Tab &tab = m_coreInterface->GetTabContainerImpl()->GetSelectedTab();
+	auto pidlDirectory = tab.GetShellBrowserImpl()->GetDirectoryIdl();
 
 	std::wstring folderDisplayName;
 
 	/* Don't show full paths for virtual folders (as only the folders
 	GUID will be shown). */
-	if (m_config->showFullTitlePath.get() && !tab.GetShellBrowser()->InVirtualFolder())
+	if (m_app->GetConfig()->showFullTitlePath.get()
+		&& !tab.GetShellBrowserImpl()->InVirtualFolder())
 	{
 		GetDisplayName(pidlDirectory.get(), SHGDN_FORPARSING, folderDisplayName);
 	}
@@ -128,72 +138,62 @@ void MainWindow::UpdateWindowText()
 		GetDisplayName(pidlDirectory.get(), SHGDN_NORMAL, folderDisplayName);
 	}
 
-	TCHAR szTitle[512];
+	std::wstring title = std::format(L"{} - {}", folderDisplayName, App::APP_NAME);
 
-	TCHAR szTemp[64];
-	LoadString(m_resourceInstance, IDS_MAIN_WINDOW_TITLE, szTemp, SIZEOF_ARRAY(szTemp));
-	StringCchPrintf(szTitle, SIZEOF_ARRAY(szTitle), szTemp, folderDisplayName.c_str(),
-		NExplorerplusplus::APP_NAME);
-
-	if (m_config->showUserNameInTitleBar.get() || m_config->showPrivilegeLevelInTitleBar.get())
+	if (m_app->GetConfig()->showUserNameInTitleBar.get()
+		|| m_app->GetConfig()->showPrivilegeLevelInTitleBar.get())
 	{
-		StringCchCat(szTitle, SIZEOF_ARRAY(szTitle), _T(" ["));
+		title += L" [";
 	}
 
-	if (m_config->showUserNameInTitleBar.get())
+	if (m_app->GetConfig()->showUserNameInTitleBar.get())
 	{
-		TCHAR szOwner[512];
-		GetProcessOwner(GetCurrentProcessId(), szOwner, SIZEOF_ARRAY(szOwner));
+		TCHAR owner[512];
+		GetProcessOwner(GetCurrentProcessId(), owner, std::size(owner));
 
-		StringCchCat(szTitle, SIZEOF_ARRAY(szTitle), szOwner);
+		title += owner;
 	}
 
-	if (m_config->showPrivilegeLevelInTitleBar.get())
+	if (m_app->GetConfig()->showPrivilegeLevelInTitleBar.get())
 	{
-		TCHAR szPrivilegeAddition[64];
-		TCHAR szPrivilege[64];
+		std::wstring privilegeLevel;
 
 		if (CheckGroupMembership(GroupType::Administrators))
 		{
-			LoadString(m_resourceInstance, IDS_PRIVILEGE_LEVEL_ADMINISTRATORS, szPrivilege,
-				SIZEOF_ARRAY(szPrivilege));
+			privilegeLevel = ResourceHelper::LoadString(m_app->GetResourceInstance(),
+				IDS_PRIVILEGE_LEVEL_ADMINISTRATORS);
 		}
 		else if (CheckGroupMembership(GroupType::PowerUsers))
 		{
-			LoadString(m_resourceInstance, IDS_PRIVILEGE_LEVEL_POWER_USERS, szPrivilege,
-				SIZEOF_ARRAY(szPrivilege));
+			privilegeLevel = ResourceHelper::LoadString(m_app->GetResourceInstance(),
+				IDS_PRIVILEGE_LEVEL_POWER_USERS);
 		}
 		else if (CheckGroupMembership(GroupType::Users))
 		{
-			LoadString(m_resourceInstance, IDS_PRIVILEGE_LEVEL_USERS, szPrivilege,
-				SIZEOF_ARRAY(szPrivilege));
+			privilegeLevel =
+				ResourceHelper::LoadString(m_app->GetResourceInstance(), IDS_PRIVILEGE_LEVEL_USERS);
 		}
 		else if (CheckGroupMembership(GroupType::UsersRestricted))
 		{
-			LoadString(m_resourceInstance, IDS_PRIVILEGE_LEVEL_USERS_RESTRICTED, szPrivilege,
-				SIZEOF_ARRAY(szPrivilege));
+			privilegeLevel = ResourceHelper::LoadString(m_app->GetResourceInstance(),
+				IDS_PRIVILEGE_LEVEL_USERS_RESTRICTED);
 		}
 
-		if (m_config->showUserNameInTitleBar.get())
+		if (m_app->GetConfig()->showUserNameInTitleBar.get())
 		{
-			StringCchPrintf(szPrivilegeAddition, SIZEOF_ARRAY(szPrivilegeAddition), _T(" - %s"),
-				szPrivilege);
-		}
-		else
-		{
-			StringCchPrintf(szPrivilegeAddition, SIZEOF_ARRAY(szPrivilegeAddition), _T("%s"),
-				szPrivilege);
+			title += L" - ";
 		}
 
-		StringCchCat(szTitle, SIZEOF_ARRAY(szTitle), szPrivilegeAddition);
+		title += privilegeLevel;
 	}
 
-	if (m_config->showUserNameInTitleBar.get() || m_config->showPrivilegeLevelInTitleBar.get())
+	if (m_app->GetConfig()->showUserNameInTitleBar.get()
+		|| m_app->GetConfig()->showPrivilegeLevelInTitleBar.get())
 	{
-		StringCchCat(szTitle, SIZEOF_ARRAY(szTitle), _T("]"));
+		title += L"]";
 	}
 
-	SetWindowText(m_hwnd, szTitle);
+	SetWindowText(m_hwnd, title.c_str());
 }
 
 // DropTargetInternal

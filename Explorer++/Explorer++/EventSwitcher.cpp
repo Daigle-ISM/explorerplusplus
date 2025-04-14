@@ -9,9 +9,9 @@
 
 #include "stdafx.h"
 #include "Explorer++.h"
-#include "ShellBrowser/ShellBrowser.h"
+#include "ShellBrowser/ShellBrowserImpl.h"
 #include "ShellTreeView/ShellTreeView.h"
-#include "TabContainer.h"
+#include "TabContainerImpl.h"
 
 void Explorerplusplus::OnCopyItemPath() const
 {
@@ -51,8 +51,8 @@ void Explorerplusplus::OnCopy(BOOL bCopy)
 
 	if (hFocus == m_hActiveListView)
 	{
-		Tab &selectedTab = GetActivePane()->GetTabContainer()->GetSelectedTab();
-		selectedTab.GetShellBrowser()->CopySelectedItemsToClipboard(bCopy);
+		Tab &selectedTab = GetActivePane()->GetTabContainerImpl()->GetSelectedTab();
+		selectedTab.GetShellBrowserImpl()->CopySelectedItemsToClipboard(bCopy);
 	}
 	else if (hFocus == m_shellTreeView->GetHWND())
 	{
@@ -66,8 +66,8 @@ void Explorerplusplus::OnFileRename()
 
 	if (hFocus == m_hActiveListView)
 	{
-		Tab &selectedTab = GetActivePane()->GetTabContainer()->GetSelectedTab();
-		selectedTab.GetShellBrowser()->StartRenamingSelectedItems();
+		Tab &selectedTab = GetActivePane()->GetTabContainerImpl()->GetSelectedTab();
+		selectedTab.GetShellBrowserImpl()->StartRenamingSelectedItems();
 	}
 	else if (hFocus == m_shellTreeView->GetHWND())
 	{
@@ -83,8 +83,8 @@ void Explorerplusplus::OnFileDelete(bool permanent)
 
 	if (hFocus == m_hActiveListView)
 	{
-		Tab &tab = GetActivePane()->GetTabContainer()->GetSelectedTab();
-		tab.GetShellBrowser()->DeleteSelectedItems(permanent);
+		Tab &tab = GetActivePane()->GetTabContainerImpl()->GetSelectedTab();
+		tab.GetShellBrowserImpl()->DeleteSelectedItems(permanent);
 	}
 	else if (hFocus == m_shellTreeView->GetHWND())
 	{
@@ -116,8 +116,8 @@ void Explorerplusplus::OnShowFileProperties() const
 
 	if (hFocus == m_hActiveListView)
 	{
-		const Tab &selectedTab = GetActivePane()->GetTabContainer()->GetSelectedTab();
-		selectedTab.GetShellBrowser()->ShowPropertiesForSelectedFiles();
+		const Tab &selectedTab = GetActivePane()->GetTabContainerImpl()->GetSelectedTab();
+		selectedTab.GetShellBrowserImpl()->ShowPropertiesForSelectedFiles();
 	}
 	else if (hFocus == m_shellTreeView->GetHWND())
 	{
@@ -145,7 +145,7 @@ void Explorerplusplus::OnPasteShortcut()
 
 	if (focus == m_hActiveListView)
 	{
-		GetActiveShellBrowser()->PasteShortcut();
+		GetActiveShellBrowserImpl()->PasteShortcut();
 	}
 	else if (focus == m_shellTreeView->GetHWND())
 	{

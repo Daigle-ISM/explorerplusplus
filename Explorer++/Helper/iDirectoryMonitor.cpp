@@ -4,7 +4,6 @@
 
 #include "stdafx.h"
 #include "iDirectoryMonitor.h"
-#include "Macros.h"
 #include <list>
 
 DWORD WINAPI Thread_DirModifiedInternal(LPVOID Container);
@@ -205,7 +204,7 @@ std::optional<int> DirectoryMonitor::WatchDirectory(const TCHAR *Directory, UINT
 	CD/DVD drives etc). */
 	SetErrorMode(SEM_FAILCRITICALERRORS);
 
-	StringCchCopy(pDirInfo.m_DirPath, SIZEOF_ARRAY(pDirInfo.m_DirPath), Directory);
+	StringCchCopy(pDirInfo.m_DirPath, std::size(pDirInfo.m_DirPath), Directory);
 
 	pDirInfo.m_hDirectory = CreateFile(pDirInfo.m_DirPath, FILE_LIST_DIRECTORY,
 		FILE_SHARE_READ | FILE_SHARE_DELETE | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
@@ -258,7 +257,7 @@ std::optional<int> DirectoryMonitor::WatchDirectory(HANDLE hDirectory, const TCH
 	CD/DVD drives etc). */
 	SetErrorMode(SEM_FAILCRITICALERRORS);
 
-	StringCchCopy(pDirInfo.m_DirPath, SIZEOF_ARRAY(pDirInfo.m_DirPath), Directory);
+	StringCchCopy(pDirInfo.m_DirPath, std::size(pDirInfo.m_DirPath), Directory);
 
 	pDirInfo.m_hDirectory = hDirectory;
 
@@ -343,7 +342,7 @@ void CALLBACK DirectoryMonitor::CompletionRoutine(DWORD dwErrorCode, DWORD Numbe
 			}
 
 			/* FileNameLength is size in bytes NOT characters. */
-			StringCchCopyN(szFileName, SIZEOF_ARRAY(szFileName), pfni->FileName,
+			StringCchCopyN(szFileName, std::size(szFileName), pfni->FileName,
 				pfni->FileNameLength / sizeof(TCHAR));
 			pDirInfo->m_OnDirectoryAltered(szFileName, pfni->Action, pDirInfo->m_pData);
 

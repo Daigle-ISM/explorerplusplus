@@ -4,25 +4,28 @@
 
 #include "stdafx.h"
 #include "SearchTabsDialog.h"
+#include "App.h"
 #include "CoreInterface.h"
 #include "MainResource.h"
-#include "ResourceHelper.h"
-#include "ShellBrowser/ShellBrowser.h"
-#include "TabContainer.h"
+#include "ResourceLoader.h"
+#include "ShellBrowser/ShellBrowserImpl.h"
+#include "TabContainerImpl.h"
 #include "../Helper/ListViewHelper.h"
+#include "../Helper/ScopedRedrawDisabler.h"
 #include "../Helper/WindowHelper.h"
-#include "../Helper/WindowSubclassWrapper.h"
+#include "../Helper/WindowSubclass.h"
 #include <boost/algorithm/string/predicate.hpp>
+#include <glog/logging.h>
 
-SearchTabsDialog *SearchTabsDialog::Create(HINSTANCE resourceInstance, HWND parent,
-	CoreInterface *coreInterface)
+SearchTabsDialog *SearchTabsDialog::Create(App *app, HWND parent, CoreInterface *coreInterface)
 {
-	return new SearchTabsDialog(resourceInstance, parent, coreInterface);
+	return new SearchTabsDialog(app, parent, coreInterface);
 }
 
-SearchTabsDialog::SearchTabsDialog(HINSTANCE resourceInstance, HWND parent,
-	CoreInterface *coreInterface) :
-	ThemedDialog(resourceInstance, IDD_SEARCH_TABS, parent, BaseDialog::DialogSizingType::Both),
+SearchTabsDialog::SearchTabsDialog(App *app, HWND parent, CoreInterface *coreInterface) :
+	ThemedDialog(app->GetResourceInstance(), IDD_SEARCH_TABS, parent,
+		BaseDialog::DialogSizingType::Both, app->GetThemeManager()),
+	m_app(app),
 	m_coreInterface(coreInterface),
 	m_persistentSettings(&SearchTabsDialogPersistentSettings::GetInstance())
 {
@@ -33,17 +36,20 @@ INT_PTR SearchTabsDialog::OnInitDialog()
 	SetupListView();
 	SetupEditControl();
 
-	m_connections.push_back(m_coreInterface->GetTabContainer()->tabCreatedSignal.AddObserver(
-		std::bind(&SearchTabsDialog::OnTabsChanged, this)));
-	m_connections.push_back(
-		m_coreInterface->GetTabContainer()->tabNavigationCommittedSignal.AddObserver(
-			std::bind(&SearchTabsDialog::OnTabsChanged, this)));
-	m_connections.push_back(m_coreInterface->GetTabContainer()->tabUpdatedSignal.AddObserver(
-		std::bind(&SearchTabsDialog::OnTabsChanged, this)));
-	m_connections.push_back(m_coreInterface->GetTabContainer()->tabMovedSignal.AddObserver(
-		std::bind(&SearchTabsDialog::OnTabsChanged, this)));
-	m_connections.push_back(m_coreInterface->GetTabContainer()->tabRemovedSignal.AddObserver(
-		std::bind(&SearchTabsDialog::OnTabsChanged, this)));
+	m_connections.push_back(m_app->GetTabEvents()->AddCreatedObserver(
+		std::bind(&SearchTabsDialog::OnTabsChanged, this), TabEventScope::Global()));
+	m_connections.push_back(m_app->GetTabEvents()->AddUpdatedObserver(
+		std::bind(&SearchTabsDialog::OnTabsChanged, this), TabEventScope::Global()));
+	m_connections.push_back(m_app->GetTabEvents()->AddMovedObserver(
+		std::bind(&SearchTabsDialog::OnTabsChanged, this), TabEventScope::Global()));
+	m_connections.push_back(m_app->GetTabEvents()->AddRemovedObserver(
+		std::bind(&SearchTabsDialog::OnTabsChanged, this), TabEventScope::Global()));
+
+	m_connections.push_back(m_app->GetShellBrowserEvents()->AddDirectoryPropertiesChangedObserver(
+		std::bind(&SearchTabsDialog::OnTabsChanged, this), ShellBrowserEventScope::Global()));
+
+	m_connections.push_back(m_app->GetNavigationEvents()->AddCommittedObserver(
+		std::bind(&SearchTabsDialog::OnTabsChanged, this), NavigationEventScope::Global()));
 
 	SendMessage(m_hDlg, WM_NEXTDLGCTL,
 		reinterpret_cast<WPARAM>(GetDlgItem(m_hDlg, IDC_SEARCH_TABS_SEARCH_TERM)), true);
@@ -129,21 +135,20 @@ std::wstring SearchTabsDialog::GetColumnText(ColumnType columnType)
 		break;
 
 	default:
-		throw std::runtime_error("Search tabs column type not found");
+		LOG(FATAL) << "Search tabs column type not found";
+		__assume(0);
 	}
 
-	return ResourceHelper::LoadString(m_coreInterface->GetResourceInstance(), stringId);
+	return m_app->GetResourceLoader()->LoadString(stringId);
 }
 
 void SearchTabsDialog::RefreshTabList(SelectionOption selectionOption)
 {
 	HWND listView = GetDlgItem(m_hDlg, IDC_SEARCH_TABS_TAB_LIST);
-	SendMessage(listView, WM_SETREDRAW, FALSE, NULL);
 
+	ScopedRedrawDisabler redrawDisabler(listView);
 	ListView_DeleteAllItems(listView);
 	AddTabs(selectionOption);
-
-	SendMessage(listView, WM_SETREDRAW, TRUE, NULL);
 }
 
 void SearchTabsDialog::AddTabs(SelectionOption selectionOption)
@@ -151,7 +156,7 @@ void SearchTabsDialog::AddTabs(SelectionOption selectionOption)
 	HWND listView = GetDlgItem(m_hDlg, IDC_SEARCH_TABS_TAB_LIST);
 	int index = 0;
 
-	for (auto tabRef : m_coreInterface->GetTabContainer()->GetAllTabsInOrder()
+	for (auto tabRef : m_coreInterface->GetTabContainerImpl()->GetAllTabsInOrder()
 			| std::views::filter([this](const auto &tab) { return TabFilter(tab, m_filter); }))
 	{
 		auto &tab = tabRef.get();
@@ -160,7 +165,7 @@ void SearchTabsDialog::AddTabs(SelectionOption selectionOption)
 		switch (selectionOption)
 		{
 		case SearchTabsDialog::SelectionOption::SelectActiveTab:
-			if (m_coreInterface->GetTabContainer()->IsTabSelected(tab))
+			if (tab.GetTabContainer()->IsTabSelected(tab))
 			{
 				ListViewHelper::SelectItem(listView, index, true);
 			}
@@ -190,7 +195,7 @@ bool SearchTabsDialog::TabFilter(const Tab &tab, const std::wstring &filter)
 		return true;
 	}
 
-	if (boost::icontains(tab.GetShellBrowser()->GetDirectory(), filter))
+	if (boost::icontains(tab.GetShellBrowserImpl()->GetDirectory(), filter))
 	{
 		return true;
 	}
@@ -216,11 +221,11 @@ void SearchTabsDialog::SetupEditControl()
 {
 	HWND edit = GetDlgItem(m_hDlg, IDC_SEARCH_TABS_SEARCH_TERM);
 
-	m_editSubclass = std::make_unique<WindowSubclassWrapper>(edit,
+	m_editSubclass = std::make_unique<WindowSubclass>(edit,
 		std::bind_front(&SearchTabsDialog::EditWndProc, this));
 
-	auto placeHolderText = ResourceHelper::LoadString(m_coreInterface->GetResourceInstance(),
-		IDS_SEARCH_TABS_SEARCH_TERM_PLACEHOLDER_TEXT);
+	auto placeHolderText =
+		m_app->GetResourceLoader()->LoadString(IDS_SEARCH_TABS_SEARCH_TERM_PLACEHOLDER_TEXT);
 	SendMessage(edit, EM_SETCUEBANNER, true, reinterpret_cast<LPARAM>(placeHolderText.c_str()));
 
 	SetWindowText(edit, m_filter.c_str());
@@ -292,7 +297,7 @@ void SearchTabsDialog::OnListViewDoubleClick(const NMITEMACTIVATE *itemActivate)
 	}
 
 	Tab &tab = GetTabFromListView(itemActivate->iItem);
-	m_coreInterface->GetTabContainer()->SelectTab(tab);
+	m_coreInterface->GetTabContainerImpl()->SelectTab(tab);
 
 	DestroyWindow(m_hDlg);
 }
@@ -321,10 +326,10 @@ std::wstring SearchTabsDialog::GetTabColumnText(const Tab &tab, ColumnType colum
 		return tab.GetName();
 
 	case SearchTabsDialog::ColumnType::Path:
-		return tab.GetShellBrowser()->GetDirectory();
+		return tab.GetShellBrowserImpl()->GetDirectory();
 
 	default:
-		throw std::runtime_error("Search tabs column type not found");
+		LOG(FATAL) << "Search tabs column type not found";
 	}
 }
 
@@ -391,7 +396,7 @@ void SearchTabsDialog::OnOk()
 	if (selectedItemIndex != -1)
 	{
 		Tab &tab = GetTabFromListView(selectedItemIndex);
-		m_coreInterface->GetTabContainer()->SelectTab(tab);
+		m_coreInterface->GetTabContainerImpl()->SelectTab(tab);
 	}
 
 	DestroyWindow(m_hDlg);
@@ -404,13 +409,9 @@ Tab &SearchTabsDialog::GetTabFromListView(int index)
 	lvItem.iItem = index;
 	lvItem.iSubItem = 0;
 	BOOL res = ListView_GetItem(GetDlgItem(m_hDlg, IDC_SEARCH_TABS_TAB_LIST), &lvItem);
+	CHECK(res);
 
-	if (!res)
-	{
-		throw std::runtime_error("Item lookup failed");
-	}
-
-	return m_coreInterface->GetTabContainer()->GetTab(static_cast<int>(lvItem.lParam));
+	return m_coreInterface->GetTabContainerImpl()->GetTab(static_cast<int>(lvItem.lParam));
 }
 
 void SearchTabsDialog::OnCancel()

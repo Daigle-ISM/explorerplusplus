@@ -9,8 +9,7 @@
 
 #include "stdafx.h"
 #include "FileActionHandler.h"
-#include "../Helper/FileOperations.h"
-#include "../Helper/Macros.h"
+#include "FileOperations.h"
 
 BOOL FileActionHandler::RenameFiles(const RenamedItems_t &itemList)
 {
@@ -26,12 +25,12 @@ BOOL FileActionHandler::RenameFiles(const RenamedItems_t &itemList)
 		if (SUCCEEDED(hr))
 		{
 			TCHAR newFilename[MAX_PATH];
-			StringCchCopy(newFilename, SIZEOF_ARRAY(newFilename), item.strNewFilename.c_str());
+			StringCchCopy(newFilename, std::size(newFilename), item.strNewFilename.c_str());
 			PathStripPath(newFilename);
 
 			/* TODO: Could rename all files in the list in a single
 			operation, rather than one by one.*/
-			hr = NFileOperations::RenameFile(shellItem, newFilename);
+			hr = FileOperations::RenameFile(shellItem, newFilename);
 
 			if (SUCCEEDED(hr))
 			{
@@ -57,10 +56,10 @@ BOOL FileActionHandler::RenameFiles(const RenamedItems_t &itemList)
 	return FALSE;
 }
 
-HRESULT FileActionHandler::DeleteFiles(HWND hwnd, DeletedItems_t &deletedItems, bool permanent,
-	bool silent)
+HRESULT FileActionHandler::DeleteFiles(HWND hwnd, const DeletedItems_t &deletedItems,
+	bool permanent, bool silent)
 {
-	HRESULT hr = NFileOperations::DeleteFiles(hwnd, deletedItems, permanent, silent);
+	HRESULT hr = FileOperations::DeleteFiles(hwnd, deletedItems, permanent, silent);
 
 	if (SUCCEEDED(hr))
 	{

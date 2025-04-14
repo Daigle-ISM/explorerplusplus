@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include "../Helper/Macros.h"
 #include "../Helper/ShellHelper.h"
 #include <wil/resource.h>
 
@@ -24,7 +23,7 @@ struct BasicItemInfo_t
 		pridl.reset(ILCloneChild(other.pridl.get()));
 		wfd = other.wfd;
 		isFindDataValid = other.isFindDataValid;
-		StringCchCopy(szDisplayName, SIZEOF_ARRAY(szDisplayName), other.szDisplayName);
+		StringCchCopy(szDisplayName, std::size(szDisplayName), other.szDisplayName);
 		isRoot = other.isRoot;
 	}
 

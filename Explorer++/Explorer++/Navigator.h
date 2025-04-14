@@ -4,25 +4,35 @@
 
 #pragma once
 
+#include "NavigationHelper.h"
+#include <shtypes.h>
 #include <string>
-
-enum class OpenFolderDisposition
-{
-	CurrentTab,
-	BackgroundTab,
-	ForegroundTab,
-	NewWindow
-};
 
 class Navigator
 {
 public:
 	virtual ~Navigator() = default;
 
+	virtual void OpenDefaultItem(OpenFolderDisposition openFolderDisposition) = 0;
+
+	void OpenDefaultItem()
+	{
+		OpenDefaultItem(OpenFolderDisposition::CurrentTab);
+	}
+
 	virtual void OpenItem(const std::wstring &itemPath,
-		OpenFolderDisposition openFolderDisposition = OpenFolderDisposition::CurrentTab) = 0;
+		OpenFolderDisposition openFolderDisposition) = 0;
+
+	void OpenItem(const std::wstring &itemPath)
+	{
+		OpenItem(itemPath, OpenFolderDisposition::CurrentTab);
+	}
+
 	virtual void OpenItem(PCIDLIST_ABSOLUTE pidlItem,
-		OpenFolderDisposition openFolderDisposition = OpenFolderDisposition::CurrentTab) = 0;
-	virtual OpenFolderDisposition DetermineOpenDisposition(bool isMiddleButtonDown,
-		bool isCtrlKeyDown, bool isShiftKeyDown) = 0;
+		OpenFolderDisposition openFolderDisposition) = 0;
+
+	void OpenItem(PCIDLIST_ABSOLUTE pidlItem)
+	{
+		OpenItem(pidlItem, OpenFolderDisposition::CurrentTab);
+	}
 };

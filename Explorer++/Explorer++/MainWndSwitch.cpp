@@ -5,37 +5,39 @@
 #include "stdafx.h"
 #include "Explorer++.h"
 #include "AddressBar.h"
+#include "App.h"
 #include "Application.h"
 #include "ApplicationEditorDialog.h"
 #include "ApplicationToolbar.h"
 #include "ApplicationToolbarView.h"
-#include "Bookmarks/BookmarkTreeFactory.h"
 #include "Bookmarks/UI/BookmarksMainMenu.h"
 #include "Bookmarks/UI/BookmarksToolbar.h"
 #include "Bookmarks/UI/ManageBookmarksDialog.h"
 #include "Bookmarks/UI/Views/BookmarksToolbarView.h"
+#include "ClipboardOperations.h"
 #include "Config.h"
 #include "DisplayWindow/DisplayWindow.h"
 #include "DrivesToolbar.h"
 #include "DrivesToolbarView.h"
 #include "Explorer++_internal.h"
 #include "HolderWindow.h"
+#include "MainMenuSubMenuView.h"
+#include "MainRebarView.h"
 #include "MainResource.h"
 #include "MainToolbar.h"
 #include "MainToolbarButtons.h"
 #include "MenuRanges.h"
-#include "ModelessDialogs.h"
-#include "ShellBrowser/ShellBrowser.h"
+#include "ModelessDialogHelper.h"
+#include "ShellBrowser/ShellBrowserImpl.h"
 #include "ShellBrowser/SortModes.h"
 #include "ShellBrowser/ViewModes.h"
 #include "TabBacking.h"
-#include "TabContainer.h"
-#include "TabRestorerUI.h"
+#include "TabContainerImpl.h"
+#include "TabRestorer.h"
+#include "TabRestorerMenu.h"
 #include "../Helper/BulkClipboardWriter.h"
 #include "../Helper/Controls.h"
-#include "../Helper/FileOperations.h"
 #include "../Helper/ListViewHelper.h"
-#include "../Helper/Macros.h"
 #include "../Helper/ShellHelper.h"
 #include "../Helper/WindowHelper.h"
 
@@ -46,55 +48,10 @@ and the right edge of the treeview during
 a resizing operation. */
 static const int TREEVIEW_DRAG_OFFSET = 8;
 
-LRESULT CALLBACK Explorerplusplus::WndProcStub(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+LRESULT Explorerplusplus::WindowProcedure(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-	auto *pContainer = (Explorerplusplus *) GetWindowLongPtr(hwnd, GWLP_USERDATA);
-
 	switch (msg)
 	{
-	case WM_NCCREATE:
-	{
-		auto *createInfo = reinterpret_cast<CREATESTRUCT *>(lParam);
-
-		pContainer = new Explorerplusplus(hwnd,
-			reinterpret_cast<CommandLine::Settings *>(createInfo->lpCreateParams));
-
-		if (!pContainer)
-		{
-			PostQuitMessage(EXIT_CODE_ERROR);
-			return FALSE;
-		}
-
-		SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR) pContainer);
-	}
-		return TRUE;
-
-	case WM_NCDESTROY:
-		SetWindowLongPtr(hwnd, GWLP_USERDATA, 0);
-		delete pContainer;
-		PostQuitMessage(EXIT_CODE_NORMAL);
-		return 0;
-	}
-
-	if (pContainer != nullptr)
-	{
-		return pContainer->WindowProcedure(hwnd, msg, wParam, lParam);
-	}
-	else
-	{
-		return DefWindowProc(hwnd, msg, wParam, lParam);
-	}
-}
-
-LRESULT CALLBACK Explorerplusplus::WindowProcedure(HWND hwnd, UINT Msg, WPARAM wParam,
-	LPARAM lParam)
-{
-	switch (Msg)
-	{
-	case WM_CREATE:
-		OnCreate();
-		break;
-
 	case WM_ACTIVATE:
 		if (OnActivate(LOWORD(wParam), HIWORD(wParam)))
 		{
@@ -133,13 +90,9 @@ LRESULT CALLBACK Explorerplusplus::WindowProcedure(HWND hwnd, UINT Msg, WPARAM w
 		break;
 
 	case WM_TIMER:
-		if (wParam == AUTOSAVE_TIMER_ID)
+		if (wParam == LISTVIEW_ITEM_CHANGED_TIMER_ID)
 		{
-			SaveAllSettings();
-		}
-		else if (wParam == LISTVIEW_ITEM_CHANGED_TIMER_ID)
-		{
-			Tab &selectedTab = GetActivePane()->GetTabContainer()->GetSelectedTab();
+			Tab &selectedTab = GetActivePane()->GetTabContainerImpl()->GetSelectedTab();
 
 			UpdateDisplayWindow(selectedTab);
 			UpdateStatusBarText(selectedTab);
@@ -150,16 +103,16 @@ LRESULT CALLBACK Explorerplusplus::WindowProcedure(HWND hwnd, UINT Msg, WPARAM w
 		break;
 
 	case WM_USER_UPDATEWINDOWS:
-		UpdateWindowStates(GetActivePane()->GetTabContainer()->GetSelectedTab());
+		UpdateWindowStates(GetActivePane()->GetTabContainerImpl()->GetSelectedTab());
 		break;
 
 	case WM_USER_FILESADDED:
 	{
-		Tab *tab = GetActivePane()->GetTabContainer()->GetTabOptional(static_cast<int>(wParam));
+		Tab *tab = GetActivePane()->GetTabContainerImpl()->GetTabOptional(static_cast<int>(wParam));
 
 		if (tab)
 		{
-			tab->GetShellBrowser()->DirectoryAltered();
+			tab->GetShellBrowserImpl()->DirectoryAltered();
 		}
 	}
 	break;
@@ -169,7 +122,7 @@ LRESULT CALLBACK Explorerplusplus::WindowProcedure(HWND hwnd, UINT Msg, WPARAM w
 		break;
 
 		// See https://github.com/derceg/explorerplusplus/issues/169.
-		/*case WM_APP_ASSOCCHANGED:
+		/*case WM_APP_ASSOC_CHANGED:
 			OnAssocChanged();
 			break;*/
 
@@ -192,7 +145,7 @@ LRESULT CALLBACK Explorerplusplus::WindowProcedure(HWND hwnd, UINT Msg, WPARAM w
 		{
 			if (itr->uId == pDWFolderSizeCompletion->uId)
 			{
-				if (itr->iTabId == GetActivePane()->GetTabContainer()->GetSelectedTab().GetId())
+				if (itr->iTabId == GetActivePane()->GetTabContainerImpl()->GetSelectedTab().GetId())
 				{
 					bValid = itr->bValid;
 				}
@@ -205,43 +158,25 @@ LRESULT CALLBACK Explorerplusplus::WindowProcedure(HWND hwnd, UINT Msg, WPARAM w
 
 		if (bValid)
 		{
-			SizeDisplayFormat displayFormat = m_config->globalFolderSettings.forceSize
+			auto displayFormat = m_config->globalFolderSettings.forceSize
 				? m_config->globalFolderSettings.sizeDisplayFormat
-				: SizeDisplayFormat::None;
+				: +SizeDisplayFormat::None;
 			auto folderSizeText =
 				FormatSizeString(pDWFolderSizeCompletion->liFolderSize.QuadPart, displayFormat);
 
-			LoadString(m_resourceInstance, IDS_GENERAL_TOTALSIZE, szTotalSize,
-				SIZEOF_ARRAY(szTotalSize));
+			LoadString(m_app->GetResourceInstance(), IDS_GENERAL_TOTALSIZE, szTotalSize,
+				std::size(szTotalSize));
 
-			StringCchPrintf(szSizeString, SIZEOF_ARRAY(szSizeString), _T("%s: %s"), szTotalSize,
+			StringCchPrintf(szSizeString, std::size(szSizeString), _T("%s: %s"), szTotalSize,
 				folderSizeText.c_str());
 
 			/* TODO: The line index should be stored in some other (variable) way. */
-			DisplayWindow_SetLine(m_hDisplayWindow, FOLDER_SIZE_LINE_INDEX, szSizeString);
+			DisplayWindow_SetLine(m_displayWindow->GetHWND(), FOLDER_SIZE_LINE_INDEX, szSizeString);
 		}
 
 		free(pDWFolderSizeCompletion);
 	}
 	break;
-
-	case WM_COPYDATA:
-	{
-		auto *pcds = reinterpret_cast<COPYDATASTRUCT *>(lParam);
-
-		if (pcds->lpData != nullptr)
-		{
-			GetActivePane()->GetTabContainer()->CreateNewTab((TCHAR *) pcds->lpData,
-				TabSettings(_selected = true));
-		}
-		else
-		{
-			GetActivePane()->GetTabContainer()->CreateNewTabInDefaultDirectory(
-				TabSettings(_selected = true));
-		}
-
-		return TRUE;
-	}
 
 	case WM_NDW_RCLICK:
 	{
@@ -259,9 +194,11 @@ LRESULT CALLBACK Explorerplusplus::WindowProcedure(HWND hwnd, UINT Msg, WPARAM w
 		return CommandHandler(hwnd, reinterpret_cast<HWND>(lParam), LOWORD(wParam), HIWORD(wParam));
 
 	case WM_NOTIFY:
-		return NotifyHandler(hwnd, Msg, wParam, lParam);
+		return NotifyHandler(hwnd, msg, wParam, lParam);
 
-		HANDLE_MSG(hwnd, WM_SIZE, OnSize);
+	case WM_SIZE:
+		OnSize(static_cast<UINT>(wParam));
+		return 0;
 
 	case WM_DPICHANGED:
 		OnDpiChanged(reinterpret_cast<RECT *>(lParam));
@@ -273,10 +210,6 @@ LRESULT CALLBACK Explorerplusplus::WindowProcedure(HWND hwnd, UINT Msg, WPARAM w
 		{
 			return *res;
 		}
-		break;
-
-	case WM_SETTINGCHANGE:
-		OnSettingChange(reinterpret_cast<const WCHAR *>(lParam));
 		break;
 
 	// COM calls (such as IDropTarget::DragEnter) can result in a call being made to PeekMessage().
@@ -294,14 +227,25 @@ LRESULT CALLBACK Explorerplusplus::WindowProcedure(HWND hwnd, UINT Msg, WPARAM w
 		return 0;
 
 	case WM_APP_CLOSE:
-		RequestCloseApplication();
+		TryClose();
 		break;
+
+	case WM_ENDSESSION:
+		if (wParam)
+		{
+			m_app->SessionEnding();
+		}
+		return 0;
 
 	case WM_DESTROY:
 		return OnDestroy();
+
+	case WM_NCDESTROY:
+		delete this;
+		return 0;
 	}
 
-	return DefWindowProc(hwnd, Msg, wParam, lParam);
+	return DefSubclassProc(hwnd, msg, wParam, lParam);
 }
 
 LRESULT CALLBACK Explorerplusplus::CommandHandler(HWND hwnd, HWND control, int id,
@@ -331,25 +275,24 @@ LRESULT CALLBACK Explorerplusplus::CommandHandler(HWND hwnd, HWND control, int i
 LRESULT Explorerplusplus::HandleMenuOrToolbarButtonOrAccelerator(HWND hwnd, int id,
 	UINT notificationCode)
 {
-	if (notificationCode == 0 && id >= MENU_BOOKMARK_STARTID && id <= MENU_BOOKMARK_ENDID)
+	if (notificationCode == 0 && id >= MENU_BOOKMARK_START_ID && id < MENU_BOOKMARK_END_ID)
 	{
 		m_bookmarksMainMenu->OnMenuItemClicked(id);
 		return 0;
 	}
-	else if (notificationCode == 0 && id >= MENU_RECENT_TABS_STARTID && id < MENU_RECENT_TABS_ENDID)
-	{
-		m_tabRestorerUI->OnMenuItemClicked(id);
-		return 0;
-	}
-	else if (notificationCode == 0 && id >= MENU_PLUGIN_STARTID && id < MENU_PLUGIN_ENDID)
+	else if (notificationCode == 0 && id >= MENU_PLUGIN_START_ID && id < MENU_PLUGIN_END_ID)
 	{
 		m_pluginMenuManager.OnMenuItemClicked(id);
 		return 0;
 	}
-	else if (notificationCode == 1 && id >= ACCELERATOR_PLUGIN_STARTID
-		&& id < ACCELERATOR_PLUGIN_ENDID)
+	else if (notificationCode == 1 && id >= ACCELERATOR_PLUGIN_START_ID
+		&& id < ACCELERATOR_PLUGIN_END_ID)
 	{
 		m_pluginCommandManager.onAcceleratorPressed(id);
+		return 0;
+	}
+	else if (notificationCode == 0 && MaybeHandleMainMenuItemSelection(id))
+	{
 		return 0;
 	}
 
@@ -364,6 +307,10 @@ LRESULT Explorerplusplus::HandleMenuOrToolbarButtonOrAccelerator(HWND hwnd, int 
 	case TABTOOLBAR_CLOSE:
 	case IDM_FILE_CLOSETAB:
 		OnCloseTab();
+		break;
+
+	case IDM_FILE_NEW_WINDOW:
+		CreateNewWindow();
 		break;
 
 	case IDM_FILE_CLONEWINDOW:
@@ -422,12 +369,11 @@ LRESULT Explorerplusplus::HandleMenuOrToolbarButtonOrAccelerator(HWND hwnd, int 
 
 	case MainToolbarButton::Properties:
 	case IDM_FILE_PROPERTIES:
-	case IDM_RCLICK_PROPERTIES:
 		OnShowFileProperties();
 		break;
 
 	case IDM_FILE_EXIT:
-		RequestCloseApplication();
+		m_app->TryExit();
 		break;
 
 	case IDM_EDIT_UNDO:
@@ -446,15 +392,21 @@ LRESULT Explorerplusplus::HandleMenuOrToolbarButtonOrAccelerator(HWND hwnd, int 
 
 	case MainToolbarButton::Paste:
 	case IDM_EDIT_PASTE:
+	case IDM_BACKGROUND_CONTEXT_MENU_PASTE:
 		OnPaste();
 		break;
 
 	case IDM_EDIT_PASTESHORTCUT:
+	case IDM_BACKGROUND_CONTEXT_MENU_PASTE_SHORTCUT:
 		OnPasteShortcut();
 		break;
 
 	case IDM_EDIT_PASTEHARDLINK:
-		PasteHardLinks(m_pActiveShellBrowser->GetDirectory().c_str());
+		GetActiveShellBrowserImpl()->PasteHardLinks();
+		break;
+
+	case IDM_EDIT_PASTE_SYMBOLIC_LINK:
+		GetActiveShellBrowserImpl()->PasteSymLinks();
 		break;
 
 	case IDM_EDIT_COPYTOFOLDER:
@@ -468,7 +420,7 @@ LRESULT Explorerplusplus::HandleMenuOrToolbarButtonOrAccelerator(HWND hwnd, int 
 		break;
 
 	case IDM_EDIT_SELECTALL:
-		ListViewHelper::SelectAllItems(m_hActiveListView, TRUE);
+		ListViewHelper::SelectAllItems(m_hActiveListView, true);
 		SetFocus(m_hActiveListView);
 		break;
 
@@ -483,7 +435,7 @@ LRESULT Explorerplusplus::HandleMenuOrToolbarButtonOrAccelerator(HWND hwnd, int 
 		break;
 
 	case IDM_EDIT_SELECTNONE:
-		ListViewHelper::SelectAllItems(m_hActiveListView, FALSE);
+		ListViewHelper::SelectAllItems(m_hActiveListView, false);
 		SetFocus(m_hActiveListView);
 		break;
 
@@ -515,9 +467,7 @@ LRESULT Explorerplusplus::HandleMenuOrToolbarButtonOrAccelerator(HWND hwnd, int 
 		break;
 
 	case IDM_VIEW_DISPLAYWINDOW:
-		m_config->showDisplayWindow = !m_config->showDisplayWindow;
-		lShowWindow(m_hDisplayWindow, m_config->showDisplayWindow);
-		UpdateLayout();
+		m_config->showDisplayWindow = !m_config->showDisplayWindow.get();
 		break;
 
 	case IDM_DISPLAYWINDOW_VERTICAL:
@@ -547,7 +497,7 @@ LRESULT Explorerplusplus::HandleMenuOrToolbarButtonOrAccelerator(HWND hwnd, int 
 		break;
 
 	case IDM_TOOLBARS_LOCKTOOLBARS:
-		OnLockToolbars();
+		OnToggleLockToolbars();
 		break;
 
 	case IDM_TOOLBARS_CUSTOMIZE:
@@ -562,43 +512,57 @@ LRESULT Explorerplusplus::HandleMenuOrToolbarButtonOrAccelerator(HWND hwnd, int 
 		OnChangeMainFontSize(FontSizeType::Increase);
 		break;
 
+	case IDA_RESET_TEXT_SIZE:
+		OnResetMainFontSize();
+		break;
+
 	case IDM_VIEW_EXTRALARGEICONS:
-		GetActivePane()->GetTabContainer()->GetSelectedTab().GetShellBrowser()->SetViewMode(
+		GetActivePane()->GetTabContainerImpl()->GetSelectedTab().GetShellBrowserImpl()->SetViewMode(
 			ViewMode::ExtraLargeIcons);
 		break;
 
 	case IDM_VIEW_LARGEICONS:
-		GetActivePane()->GetTabContainer()->GetSelectedTab().GetShellBrowser()->SetViewMode(
+		GetActivePane()->GetTabContainerImpl()->GetSelectedTab().GetShellBrowserImpl()->SetViewMode(
 			ViewMode::LargeIcons);
 		break;
 
 	case IDM_VIEW_ICONS:
-		GetActivePane()->GetTabContainer()->GetSelectedTab().GetShellBrowser()->SetViewMode(
+		GetActivePane()->GetTabContainerImpl()->GetSelectedTab().GetShellBrowserImpl()->SetViewMode(
 			ViewMode::Icons);
 		break;
 
 	case IDM_VIEW_SMALLICONS:
-		GetActivePane()->GetTabContainer()->GetSelectedTab().GetShellBrowser()->SetViewMode(
+		GetActivePane()->GetTabContainerImpl()->GetSelectedTab().GetShellBrowserImpl()->SetViewMode(
 			ViewMode::SmallIcons);
 		break;
 
 	case IDM_VIEW_LIST:
-		GetActivePane()->GetTabContainer()->GetSelectedTab().GetShellBrowser()->SetViewMode(
+		GetActivePane()->GetTabContainerImpl()->GetSelectedTab().GetShellBrowserImpl()->SetViewMode(
 			ViewMode::List);
 		break;
 
 	case IDM_VIEW_DETAILS:
-		GetActivePane()->GetTabContainer()->GetSelectedTab().GetShellBrowser()->SetViewMode(
+		GetActivePane()->GetTabContainerImpl()->GetSelectedTab().GetShellBrowserImpl()->SetViewMode(
 			ViewMode::Details);
 		break;
 
+	case IDM_VIEW_EXTRALARGETHUMBNAILS:
+		GetActivePane()->GetTabContainerImpl()->GetSelectedTab().GetShellBrowserImpl()->SetViewMode(
+			ViewMode::ExtraLargeThumbnails);
+		break;
+
+	case IDM_VIEW_LARGETHUMBNAILS:
+		GetActivePane()->GetTabContainerImpl()->GetSelectedTab().GetShellBrowserImpl()->SetViewMode(
+			ViewMode::LargeThumbnails);
+		break;
+
 	case IDM_VIEW_THUMBNAILS:
-		GetActivePane()->GetTabContainer()->GetSelectedTab().GetShellBrowser()->SetViewMode(
+		GetActivePane()->GetTabContainerImpl()->GetSelectedTab().GetShellBrowserImpl()->SetViewMode(
 			ViewMode::Thumbnails);
 		break;
 
 	case IDM_VIEW_TILES:
-		GetActivePane()->GetTabContainer()->GetSelectedTab().GetShellBrowser()->SetViewMode(
+		GetActivePane()->GetTabContainerImpl()->GetSelectedTab().GetShellBrowserImpl()->SetViewMode(
 			ViewMode::Tiles);
 		break;
 
@@ -1131,12 +1095,15 @@ LRESULT Explorerplusplus::HandleMenuOrToolbarButtonOrAccelerator(HWND hwnd, int 
 		break;
 
 	case IDM_VIEW_AUTOARRANGE:
-		GetActivePane()->GetTabContainer()->GetSelectedTab().GetShellBrowser()->SetAutoArrange(
-			!GetActivePane()
-				 ->GetTabContainer()
-				 ->GetSelectedTab()
-				 .GetShellBrowser()
-				 ->GetAutoArrange());
+		GetActivePane()
+			->GetTabContainerImpl()
+			->GetSelectedTab()
+			.GetShellBrowserImpl()
+			->SetAutoArrange(!GetActivePane()
+					->GetTabContainerImpl()
+					->GetSelectedTab()
+					.GetShellBrowserImpl()
+					->GetAutoArrange());
 		break;
 
 	case IDM_VIEW_SHOWHIDDENFILES:
@@ -1145,6 +1112,7 @@ LRESULT Explorerplusplus::HandleMenuOrToolbarButtonOrAccelerator(HWND hwnd, int 
 
 	case MainToolbarButton::Refresh:
 	case IDM_VIEW_REFRESH:
+	case IDM_BACKGROUND_CONTEXT_MENU_REFRESH:
 		OnRefresh();
 		break;
 
@@ -1245,96 +1213,56 @@ LRESULT Explorerplusplus::HandleMenuOrToolbarButtonOrAccelerator(HWND hwnd, int 
 
 	case MainToolbarButton::Back:
 	case IDM_GO_BACK:
-		OnGoBack();
+		m_commandController.ExecuteCommand(IDM_GO_BACK, DetermineOpenDisposition(false));
 		break;
 
 	case MainToolbarButton::Forward:
 	case IDM_GO_FORWARD:
-		OnGoForward();
+		m_commandController.ExecuteCommand(IDM_GO_FORWARD, DetermineOpenDisposition(false));
 		break;
 
 	case MainToolbarButton::Up:
-	case IDM_GO_UPONELEVEL:
-		OnNavigateUp();
+	case IDM_GO_UP:
+		m_commandController.ExecuteCommand(IDM_GO_UP, DetermineOpenDisposition(false));
 		break;
 
 	case IDM_GO_QUICK_ACCESS:
-		OnGoToPath(QUICK_ACCESS_PATH);
-		break;
-
 	case IDM_GO_COMPUTER:
-		OnGoToKnownFolder(FOLDERID_ComputerFolder);
-		break;
-
 	case IDM_GO_DOCUMENTS:
-		OnGoToKnownFolder(FOLDERID_Documents);
-		break;
-
 	case IDM_GO_DOWNLOADS:
-		OnGoToKnownFolder(FOLDERID_Downloads);
-		break;
-
 	case IDM_GO_MUSIC:
-		OnGoToKnownFolder(FOLDERID_Music);
-		break;
-
 	case IDM_GO_PICTURES:
-		OnGoToKnownFolder(FOLDERID_Pictures);
-		break;
-
 	case IDM_GO_VIDEOS:
-		OnGoToKnownFolder(FOLDERID_Videos);
-		break;
-
 	case IDM_GO_DESKTOP:
-		OnGoToKnownFolder(FOLDERID_Desktop);
-		break;
-
 	case IDM_GO_RECYCLE_BIN:
-		OnGoToKnownFolder(FOLDERID_RecycleBinFolder);
-		break;
-
 	case IDM_GO_CONTROL_PANEL:
-		OnGoToKnownFolder(FOLDERID_ControlPanelFolder);
-		break;
-
 	case IDM_GO_PRINTERS:
-		OnGoToKnownFolder(FOLDERID_PrintersFolder);
-		break;
-
 	case IDM_GO_NETWORK:
-		OnGoToKnownFolder(FOLDERID_NetworkFolder);
-		break;
-
 	case IDM_GO_WSL_DISTRIBUTIONS:
-		OnGoToPath(WSL_DISTRIBUTIONS_PATH);
+		m_commandController.ExecuteCommand(id, DetermineOpenDisposition(false));
 		break;
 
 	case MainToolbarButton::AddBookmark:
 	case IDM_BOOKMARKS_BOOKMARKTHISTAB:
-		BookmarkHelper::AddBookmarkItem(BookmarkTreeFactory::GetInstance()->GetBookmarkTree(),
-			BookmarkItem::Type::Bookmark, nullptr, std::nullopt, hwnd, this);
+		BookmarkHelper::AddBookmarkItem(m_app->GetBookmarkTree(), BookmarkItem::Type::Bookmark,
+			nullptr, std::nullopt, hwnd, m_app->GetThemeManager(), this,
+			m_app->GetIconResourceLoader());
 		break;
 
 	case IDM_BOOKMARKS_BOOKMARK_ALL_TABS:
-		BookmarkHelper::BookmarkAllTabs(BookmarkTreeFactory::GetInstance()->GetBookmarkTree(),
-			m_resourceInstance, hwnd, this);
+		BookmarkHelper::BookmarkAllTabs(m_app->GetBookmarkTree(), m_app->GetResourceInstance(),
+			hwnd, m_app->GetThemeManager(), this, m_app->GetIconResourceLoader());
 		break;
 
 	case MainToolbarButton::Bookmarks:
 	case IDM_BOOKMARKS_MANAGEBOOKMARKS:
-		if (g_hwndManageBookmarks == nullptr)
-		{
-			auto *pManageBookmarksDialog =
-				new ManageBookmarksDialog(m_resourceInstance, hwnd, this, this,
-					&m_bookmarkIconFetcher, BookmarkTreeFactory::GetInstance()->GetBookmarkTree());
-			g_hwndManageBookmarks = pManageBookmarksDialog->ShowModelessDialog(
-				[]() { g_hwndManageBookmarks = nullptr; });
-		}
-		else
-		{
-			SetFocus(g_hwndManageBookmarks);
-		}
+		CreateOrSwitchToModelessDialog(m_app->GetModelessDialogList(), L"ManageBookmarksDialog",
+			[this, hwnd]
+			{
+				return new ManageBookmarksDialog(m_app->GetResourceInstance(), hwnd,
+					m_app->GetThemeManager(), this, this, m_app->GetIconResourceLoader(),
+					&m_iconFetcher, m_app->GetBookmarkTree());
+			});
 		break;
 
 	case MainToolbarButton::Search:
@@ -1371,11 +1299,11 @@ LRESULT Explorerplusplus::HandleMenuOrToolbarButtonOrAccelerator(HWND hwnd, int 
 		break;
 
 	case IDA_NEXTTAB:
-		GetActivePane()->GetTabContainer()->SelectAdjacentTab(TRUE);
+		GetActivePane()->GetTabContainerImpl()->SelectAdjacentTab(TRUE);
 		break;
 
 	case IDA_PREVIOUSTAB:
-		GetActivePane()->GetTabContainer()->SelectAdjacentTab(FALSE);
+		GetActivePane()->GetTabContainerImpl()->SelectAdjacentTab(FALSE);
 		break;
 
 	case IDA_ADDRESSBAR:
@@ -1396,8 +1324,8 @@ LRESULT Explorerplusplus::HandleMenuOrToolbarButtonOrAccelerator(HWND hwnd, int 
 		break;
 
 	case IDA_TAB_DUPLICATETAB:
-		GetActivePane()->GetTabContainer()->DuplicateTab(
-			GetActivePane()->GetTabContainer()->GetSelectedTab());
+		GetActivePane()->GetTabContainerImpl()->DuplicateTab(
+			GetActivePane()->GetTabContainerImpl()->GetSelectedTab());
 		break;
 
 	case IDA_HOME:
@@ -1441,7 +1369,7 @@ LRESULT Explorerplusplus::HandleMenuOrToolbarButtonOrAccelerator(HWND hwnd, int 
 		break;
 
 	case IDA_RESTORE_LAST_TAB:
-		m_tabRestorer->RestoreLastTab();
+		m_app->GetTabRestorer()->RestoreLastTab();
 		break;
 
 	case MainToolbarButton::Views:
@@ -1450,9 +1378,26 @@ LRESULT Explorerplusplus::HandleMenuOrToolbarButtonOrAccelerator(HWND hwnd, int 
 
 		/* Display window menus. */
 	case IDM_DW_HIDEDISPLAYWINDOW:
-		m_config->showDisplayWindow = FALSE;
-		lShowWindow(m_hDisplayWindow, m_config->showDisplayWindow);
-		UpdateLayout();
+		m_config->showDisplayWindow = false;
+		break;
+
+	case IDM_BACKGROUND_CONTEXT_MENU_CUSTOMIZE:
+		// Note that the call below won't always result in the customize tab being selected. That's
+		// because the properties dialog will select the tab based on its display name, which can
+		// change as the display language is changed in Windows.
+		// In Explorer, the title of the dialog is dynamically retrieved. Although it might be
+		// possible to do that here as well, that strategy would break if the customize dialog
+		// resource ID ever changed.
+		// Another alternative might be to load the "customize" string from the string table. But
+		// the language used by the application has nothing to do with the language used by Windows
+		// itself. Also, the text would have to be exactly the same as that used by Windows for a
+		// given language, which probably wouldn't be clear to translators. Minor variations within
+		// a language (e.g. customize vs customise) could cause the tab to not be selected.
+		// Therefore, this will only work when the actual title of the properties dialog is
+		// "customize" (ignoring case). That's not ideal, but not too much of an issue, since the
+		// properties dialog will always be opened, just not always on the customize tab.
+		ExecuteFileAction(m_hContainer, GetActiveShellBrowserImpl()->GetDirectoryIdl().get(),
+			L"properties", L"customize", L"");
 		break;
 	}
 
@@ -1484,10 +1429,9 @@ LRESULT CALLBACK Explorerplusplus::NotifyHandler(HWND hwnd, UINT msg, WPARAM wPa
 	switch (nmhdr->code)
 	{
 	case NM_CLICK:
-		if (m_config->globalFolderSettings.oneClickActivate.get()
-			&& nmhdr->hwndFrom == m_hActiveListView)
+		if (nmhdr->hwndFrom == m_hActiveListView)
 		{
-			OnListViewDoubleClick(reinterpret_cast<NMITEMACTIVATE *>(lParam));
+			OnListViewClick(reinterpret_cast<NMITEMACTIVATE *>(lParam));
 		}
 		break;
 
@@ -1502,18 +1446,17 @@ LRESULT CALLBACK Explorerplusplus::NotifyHandler(HWND hwnd, UINT msg, WPARAM wPa
 		return OnListViewKeyDown(lParam);
 
 	case TBN_ENDADJUST:
-		if (m_InitializationFinished.get())
+		if (m_browserInitialized)
 		{
 			OnRebarToolbarSizeUpdated(reinterpret_cast<NMHDR *>(lParam)->hwndFrom);
 		}
 		break;
 
-	case RBN_BEGINDRAG:
-		SendMessage(m_hMainRebar, RB_DRAGMOVE, 0, -1);
-		return 0;
-
 	case RBN_HEIGHTCHANGE:
-		UpdateLayout();
+		// This message can be dispatched within the middle of an existing layout operation (if the
+		// height of the rebar is updated). To avoid making re-entrant layout calls, the layout
+		// update will be scheduled, instead of being immediately invoked.
+		ScheduleUpdateLayout(m_weakPtrFactory.GetWeakPtr(), m_app->GetRuntime());
 		break;
 
 	case RBN_CHEVRONPUSHED:
@@ -1539,9 +1482,9 @@ LRESULT CALLBACK Explorerplusplus::NotifyHandler(HWND hwnd, UINT msg, WPARAM wPa
 		POINT ptMenu;
 		ptMenu.x = pnmrc->rc.left;
 		ptMenu.y = pnmrc->rc.bottom;
-		ClientToScreen(m_hMainRebar, &ptMenu);
+		ClientToScreen(m_mainRebarView->GetHWND(), &ptMenu);
 
-		if (pnmrc->wID == ID_BOOKMARKSTOOLBAR)
+		if (pnmrc->wID == REBAR_BAND_ID_BOOKMARKS_TOOLBAR)
 		{
 			m_bookmarksToolbar->ShowOverflowMenu(ptMenu);
 			return 0;
@@ -1555,16 +1498,16 @@ LRESULT CALLBACK Explorerplusplus::NotifyHandler(HWND hwnd, UINT msg, WPARAM wPa
 
 		switch (pnmrc->wID)
 		{
-		case ID_MAINTOOLBAR:
+		case REBAR_BAND_ID_MAIN_TOOLBAR:
 			hToolbar = m_mainToolbar->GetHWND();
 			break;
 
-		case ID_DRIVESTOOLBAR:
+		case REBAR_BAND_ID_DRIVES_TOOLBAR:
 			hToolbar = m_drivesToolbar->GetView()->GetHWND();
 			himlMenu = himlSmall;
 			break;
 
-		case ID_APPLICATIONSTOOLBAR:
+		case REBAR_BAND_ID_APPLICATIONS_TOOLBAR:
 			hToolbar = m_applicationToolbar->GetView()->GetHWND();
 			himlMenu = himlSmall;
 			break;
@@ -1598,12 +1541,11 @@ LRESULT CALLBACK Explorerplusplus::NotifyHandler(HWND hwnd, UINT msg, WPARAM wPa
 						if (IS_INTRESOURCE(tbButton.iString))
 						{
 							SendMessage(hToolbar, TB_GETSTRING,
-								MAKEWPARAM(SIZEOF_ARRAY(szText), tbButton.iString),
-								(LPARAM) szText);
+								MAKEWPARAM(std::size(szText), tbButton.iString), (LPARAM) szText);
 						}
 						else
 						{
-							StringCchCopy(szText, SIZEOF_ARRAY(szText), (LPCWSTR) tbButton.iString);
+							StringCchCopy(szText, std::size(szText), (LPCWSTR) tbButton.iString);
 						}
 
 						HMENU hSubMenu = nullptr;
@@ -1614,7 +1556,7 @@ LRESULT CALLBACK Explorerplusplus::NotifyHandler(HWND hwnd, UINT msg, WPARAM wPa
 
 						switch (pnmrc->wID)
 						{
-						case ID_MAINTOOLBAR:
+						case REBAR_BAND_ID_MAIN_TOOLBAR:
 						{
 							switch (tbButton.idCommand)
 							{
@@ -1662,7 +1604,8 @@ LRESULT CALLBACK Explorerplusplus::NotifyHandler(HWND hwnd, UINT msg, WPARAM wPa
 		UINT uFlags = TPM_LEFTALIGN | TPM_RETURNCMD;
 		int iCmd;
 
-		iCmd = TrackPopupMenu(hMenu, uFlags, ptMenu.x, ptMenu.y, 0, m_hMainRebar, nullptr);
+		iCmd = TrackPopupMenu(hMenu, uFlags, ptMenu.x, ptMenu.y, 0, m_mainRebarView->GetHWND(),
+			nullptr);
 
 		if (iCmd != 0)
 		{
@@ -1694,5 +1637,5 @@ LRESULT CALLBACK Explorerplusplus::NotifyHandler(HWND hwnd, UINT msg, WPARAM wPa
 	break;
 	}
 
-	return DefWindowProc(hwnd, msg, wParam, lParam);
+	return DefSubclassProc(hwnd, msg, wParam, lParam);
 }

@@ -19,7 +19,6 @@
 #include "MainResource.h"
 #include "ResourceHelper.h"
 #include "../Helper/DpiCompatibility.h"
-#include "../Helper/Macros.h"
 #include "../Helper/RegistrySettings.h"
 #include "../Helper/XMLSettings.h"
 #include <boost/locale.hpp>
@@ -33,9 +32,9 @@ const TCHAR MassRenameDialogPersistentSettings::SETTING_COLUMN_WIDTH_1[] = _T("C
 const TCHAR MassRenameDialogPersistentSettings::SETTING_COLUMN_WIDTH_2[] = _T("ColumnWidth2");
 
 MassRenameDialog::MassRenameDialog(HINSTANCE resourceInstance, HWND hParent,
-	const std::list<std::wstring> &FullFilenameList, IconResourceLoader *iconResourceLoader,
-	FileActionHandler *pFileActionHandler) :
-	ThemedDialog(resourceInstance, IDD_MASSRENAME, hParent, DialogSizingType::Both),
+	ThemeManager *themeManager, const std::list<std::wstring> &FullFilenameList,
+	IconResourceLoader *iconResourceLoader, FileActionHandler *pFileActionHandler) :
+	ThemedDialog(resourceInstance, IDD_MASSRENAME, hParent, DialogSizingType::Both, themeManager),
 	m_FullFilenameList(FullFilenameList),
 	m_iconResourceLoader(iconResourceLoader),
 	m_pFileActionHandler(pFileActionHandler)
@@ -86,7 +85,7 @@ INT_PTR MassRenameDialog::OnInitDialog()
 	{
 		SHGetFileInfo(strFilename.c_str(), 0, &shfi, sizeof(SHFILEINFO), SHGFI_SYSICONINDEX);
 
-		StringCchCopy(szFilename, SIZEOF_ARRAY(szFilename), strFilename.c_str());
+		StringCchCopy(szFilename, std::size(szFilename), strFilename.c_str());
 		PathStripPath(szFilename);
 
 		lvItem.mask = LVIF_TEXT | LVIF_IMAGE;
@@ -144,7 +143,7 @@ INT_PTR MassRenameDialog::OnCommand(WPARAM wParam, LPARAM lParam)
 		case EN_CHANGE:
 		{
 			TCHAR szNamePattern[MAX_PATH];
-			GetDlgItemText(m_hDlg, IDC_MASSRENAME_EDIT, szNamePattern, SIZEOF_ARRAY(szNamePattern));
+			GetDlgItemText(m_hDlg, IDC_MASSRENAME_EDIT, szNamePattern, std::size(szNamePattern));
 
 			HWND hListView = GetDlgItem(m_hDlg, IDC_MASSRENAME_FILELISTVIEW);
 
@@ -156,12 +155,12 @@ INT_PTR MassRenameDialog::OnCommand(WPARAM wParam, LPARAM lParam)
 
 			for (const auto &strFilename : m_FullFilenameList)
 			{
-				StringCchCopy(szFilename, SIZEOF_ARRAY(szFilename), strFilename.c_str());
+				StringCchCopy(szFilename, std::size(szFilename), strFilename.c_str());
 				PathStripPath(szFilename);
 
 				ProcessFileName(szNamePattern, szFilename, iItem, strNewFilename);
 
-				StringCchCopy(szNewFilename, SIZEOF_ARRAY(szNewFilename), strNewFilename.c_str());
+				StringCchCopy(szNewFilename, std::size(szNewFilename), strNewFilename.c_str());
 
 				lvItem.mask = LVIF_TEXT;
 				lvItem.iItem = iItem;
@@ -248,7 +247,7 @@ void MassRenameDialog::OnOk()
 {
 	TCHAR szNamePattern[MAX_PATH];
 
-	GetDlgItemText(m_hDlg, IDC_MASSRENAME_EDIT, szNamePattern, SIZEOF_ARRAY(szNamePattern));
+	GetDlgItemText(m_hDlg, IDC_MASSRENAME_EDIT, szNamePattern, std::size(szNamePattern));
 
 	if (lstrlen(szNamePattern) == 0)
 	{
@@ -262,13 +261,13 @@ void MassRenameDialog::OnOk()
 	for (const auto &strOldFilename : m_FullFilenameList)
 	{
 		TCHAR szFilename[MAX_PATH];
-		StringCchCopy(szFilename, SIZEOF_ARRAY(szFilename), strOldFilename.c_str());
+		StringCchCopy(szFilename, std::size(szFilename), strOldFilename.c_str());
 		PathStripPath(szFilename);
 
 		std::wstring strNewFilename;
 		ProcessFileName(szNamePattern, szFilename, iItem, strNewFilename);
 
-		StringCchCopy(szFilename, SIZEOF_ARRAY(szFilename), strOldFilename.c_str());
+		StringCchCopy(szFilename, std::size(szFilename), strOldFilename.c_str());
 		PathRemoveFileSpec(szFilename);
 		strNewFilename = szFilename + std::wstring(_T("\\")) + strNewFilename;
 
@@ -305,7 +304,7 @@ void MassRenameDialog::ProcessFileName(const std::wstring &strTarget,
 	const std::wstring &strFilename, int iFileIndex, std::wstring &strOutput)
 {
 	TCHAR szBaseName[MAX_PATH];
-	StringCchCopy(szBaseName, SIZEOF_ARRAY(szBaseName), strFilename.c_str());
+	StringCchCopy(szBaseName, std::size(szBaseName), strFilename.c_str());
 	PathRemoveExtension(szBaseName);
 
 	TCHAR *pExt = PathFindExtension(strFilename.c_str());
@@ -396,20 +395,20 @@ void MassRenameDialogPersistentSettings::LoadExtraRegistrySettings(HKEY hKey)
 void MassRenameDialogPersistentSettings::SaveExtraXMLSettings(IXMLDOMDocument *pXMLDom,
 	IXMLDOMElement *pParentNode)
 {
-	NXMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_COLUMN_WIDTH_1,
-		NXMLSettings::EncodeIntValue(m_iColumnWidth1));
-	NXMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_COLUMN_WIDTH_2,
-		NXMLSettings::EncodeIntValue(m_iColumnWidth2));
+	XMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_COLUMN_WIDTH_1,
+		XMLSettings::EncodeIntValue(m_iColumnWidth1));
+	XMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_COLUMN_WIDTH_2,
+		XMLSettings::EncodeIntValue(m_iColumnWidth2));
 }
 
 void MassRenameDialogPersistentSettings::LoadExtraXMLSettings(BSTR bstrName, BSTR bstrValue)
 {
 	if (lstrcmpi(bstrName, SETTING_COLUMN_WIDTH_1) == 0)
 	{
-		m_iColumnWidth1 = NXMLSettings::DecodeIntValue(bstrValue);
+		m_iColumnWidth1 = XMLSettings::DecodeIntValue(bstrValue);
 	}
 	else if (lstrcmpi(bstrName, SETTING_COLUMN_WIDTH_2) == 0)
 	{
-		m_iColumnWidth2 = NXMLSettings::DecodeIntValue(bstrValue);
+		m_iColumnWidth2 = XMLSettings::DecodeIntValue(bstrValue);
 	}
 }

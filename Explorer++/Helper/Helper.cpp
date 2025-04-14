@@ -4,11 +4,11 @@
 
 #include "stdafx.h"
 #include "Helper.h"
-#include "Macros.h"
 #include "ShellHelper.h"
 #include "TimeHelper.h"
 #include <boost/date_time/gregorian/gregorian.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
+#include <glog/logging.h>
 #include <wil/com.h>
 #include <wil/resource.h>
 #include <WbemIdl.h>
@@ -59,11 +59,11 @@ BOOL CreateSystemTimeString(const SYSTEMTIME *localSystemTime, TCHAR *szBuffer, 
 
 	TCHAR dateBuffer[512];
 	int iReturn1 = GetDateFormat(LOCALE_USER_DEFAULT, LOCALE_USE_CP_ACP, localSystemTime, nullptr,
-		dateBuffer, SIZEOF_ARRAY(dateBuffer));
+		dateBuffer, std::size(dateBuffer));
 
 	TCHAR timeBuffer[512];
 	int iReturn2 = GetTimeFormat(LOCALE_USER_DEFAULT, LOCALE_USE_CP_ACP, localSystemTime, nullptr,
-		timeBuffer, SIZEOF_ARRAY(timeBuffer));
+		timeBuffer, std::size(timeBuffer));
 
 	if ((iReturn1 != 0) && (iReturn2 != 0))
 	{
@@ -99,12 +99,12 @@ BOOL CreateFriendlySystemTimeString(const SYSTEMTIME *localSystemTime, TCHAR *sz
 
 	if (inputDate == today)
 	{
-		StringCchCopy(dateComponent, SIZEOF_ARRAY(dateComponent), _T("Today"));
+		StringCchCopy(dateComponent, std::size(dateComponent), _T("Today"));
 		dateComponentSet = true;
 	}
 	else if (inputDate == yesterday)
 	{
-		StringCchCopy(dateComponent, SIZEOF_ARRAY(dateComponent), _T("Yesterday"));
+		StringCchCopy(dateComponent, std::size(dateComponent), _T("Yesterday"));
 		dateComponentSet = true;
 	}
 
@@ -115,7 +115,7 @@ BOOL CreateFriendlySystemTimeString(const SYSTEMTIME *localSystemTime, TCHAR *sz
 
 	TCHAR timeComponent[512];
 	int timeFormatted = GetTimeFormat(LOCALE_USER_DEFAULT, LOCALE_USE_CP_ACP, localSystemTime,
-		nullptr, timeComponent, SIZEOF_ARRAY(timeComponent));
+		nullptr, timeComponent, std::size(timeComponent));
 
 	if (timeFormatted == 0)
 	{
@@ -151,12 +151,12 @@ HINSTANCE StartCommandPrompt(const std::wstring &directory, bool elevated)
 
 			if (elevated)
 			{
-				StringCchCopy(operation, SIZEOF_ARRAY(operation), _T("runas"));
+				StringCchCopy(operation, std::size(operation), _T("runas"));
 				parameters = _T("/K cd /d ") + directory;
 			}
 			else
 			{
-				StringCchCopy(operation, SIZEOF_ARRAY(operation), _T("open"));
+				StringCchCopy(operation, std::size(operation), _T("open"));
 			}
 
 			hNewInstance = ShellExecute(nullptr, operation, commandPath, parameters.c_str(),
@@ -257,9 +257,9 @@ BOOL FormatUserName(PSID sid, TCHAR *userName, size_t cchMax)
 	BOOL success = FALSE;
 
 	TCHAR accountName[512];
-	DWORD accountNameLength = SIZEOF_ARRAY(accountName);
+	DWORD accountNameLength = std::size(accountName);
 	TCHAR domainName[512];
-	DWORD domainNameLength = SIZEOF_ARRAY(domainName);
+	DWORD domainNameLength = std::size(domainName);
 	SID_NAME_USE eUse;
 	BOOL bRet = LookupAccountSid(nullptr, sid, accountName, &accountNameLength, domainName,
 		&domainNameLength, &eUse);
@@ -349,15 +349,6 @@ DWORD GetNumFileHardLinks(const TCHAR *lpszFileName)
 
 BOOL ReadImageProperty(const TCHAR *lpszImage, PROPID propId, TCHAR *szProperty, int cchMax)
 {
-	Gdiplus::GdiplusStartupInput gdiplusStartupInput;
-	ULONG_PTR token;
-	Gdiplus::Status status = GdiplusStartup(&token, &gdiplusStartupInput, nullptr);
-
-	if (status != Gdiplus::Ok)
-	{
-		return FALSE;
-	}
-
 	BOOL bSuccess = FALSE;
 
 	/* This object needs to be
@@ -392,7 +383,7 @@ BOOL ReadImageProperty(const TCHAR *lpszImage, PROPID propId, TCHAR *szProperty,
 
 				if (propertyItem != nullptr)
 				{
-					status = image->GetPropertyItem(propId, size, propertyItem);
+					Gdiplus::Status status = image->GetPropertyItem(propId, size, propertyItem);
 
 					if (status == Gdiplus::Ok)
 					{
@@ -416,7 +407,6 @@ BOOL ReadImageProperty(const TCHAR *lpszImage, PROPID propId, TCHAR *szProperty,
 	}
 
 	delete image;
-	Gdiplus::GdiplusShutdown(token);
 
 	return bSuccess;
 }
@@ -474,7 +464,7 @@ BOOL IsImage(const TCHAR *szFileName)
 
 	ext++;
 
-	for (i = 0; i < SIZEOF_ARRAY(IMAGE_EXTS); i++)
+	for (i = 0; i < std::size(IMAGE_EXTS); i++)
 	{
 		if (lstrcmpi(ext, IMAGE_EXTS[i]) == 0)
 		{
@@ -531,14 +521,14 @@ BOOL GetFileVersionValue(const TCHAR *szFullFileName, VersionSubBlockType subBlo
 
 				if (subBlockType == VersionSubBlockType::Root)
 				{
-					StringCchCopy(szSubBlock, SIZEOF_ARRAY(szSubBlock), _T("\\"));
+					StringCchCopy(szSubBlock, std::size(szSubBlock), _T("\\"));
 					pBuffer = reinterpret_cast<LPVOID *>(&pvsffi);
 					uStructureSize = sizeof(VS_FIXEDFILEINFO);
 				}
 				else if (subBlockType == VersionSubBlockType::Translation
 					|| subBlockType == VersionSubBlockType::StringTableValue)
 				{
-					StringCchCopy(szSubBlock, SIZEOF_ARRAY(szSubBlock),
+					StringCchCopy(szSubBlock, std::size(szSubBlock),
 						_T("\\VarFileInfo\\Translation"));
 					pBuffer = reinterpret_cast<LPVOID *>(&plcp);
 					uStructureSize = sizeof(LangAndCodePage);
@@ -590,9 +580,8 @@ BOOL GetStringTableValue(void *pBlock, LangAndCodePage *plcp, UINT nItems,
 		if ((plcp[i].wLanguage & 0xFF) == (userLangId & 0xFF) || plcp[i].wLanguage == 0)
 		{
 			TCHAR szSubBlock[64];
-			StringCchPrintf(szSubBlock, SIZEOF_ARRAY(szSubBlock),
-				_T("\\StringFileInfo\\%04X%04X\\%s"), plcp[i].wLanguage, plcp[i].wCodePage,
-				szVersionInfo);
+			StringCchPrintf(szSubBlock, std::size(szSubBlock), _T("\\StringFileInfo\\%04X%04X\\%s"),
+				plcp[i].wLanguage, plcp[i].wCodePage, szVersionInfo);
 
 			TCHAR *szBuffer;
 			UINT uLen;
@@ -731,13 +720,77 @@ bool IsKeyDown(int nVirtKey)
 	return (status != 0);
 }
 
+// Generates a simulated keypress by sending WM_KEYDOWN/WM_KEYUP messages to the specified window.
+// This isn't a general solution to sending input and should only be used if needed to invoke
+// specific behavior in a child window.
+void SendSimulatedKeyPress(HWND hwnd, UINT key)
+{
+	UINT scanCode = MapVirtualKey(key, MAPVK_VK_TO_VSC);
+
+	if (scanCode == 0)
+	{
+		DCHECK(false);
+		return;
+	}
+
+	int repeatCount = 1;
+	LPARAM additionalInfo = repeatCount | (scanCode << 16);
+	UINT flags = 0;
+
+	if (IsExtendedKey(key))
+	{
+		flags |= KF_EXTENDED;
+	}
+
+	additionalInfo |= (flags << 16);
+
+	SendMessage(hwnd, WM_KEYDOWN, key, additionalInfo);
+
+	// Both of these flags are always set for WM_KEYUP messages.
+	flags |= KF_REPEAT;
+	flags |= KF_UP;
+	additionalInfo |= (flags << 16);
+
+	SendMessage(hwnd, WM_KEYUP, key, additionalInfo);
+}
+
+bool IsExtendedKey(UINT key)
+{
+	// clang-format off
+	if (key == VK_LEFT
+		|| key == VK_UP
+		|| key == VK_RIGHT
+		|| key == VK_DOWN
+		|| key == VK_RCONTROL
+		|| key == VK_RMENU
+		|| key == VK_LWIN
+		|| key == VK_RWIN
+		|| key == VK_APPS
+		|| key == VK_PRIOR
+		|| key == VK_NEXT
+		|| key == VK_END
+		|| key == VK_HOME
+		|| key == VK_INSERT
+		|| key == VK_DELETE
+		|| key == VK_DIVIDE
+		|| key == VK_NUMLOCK
+		|| key == VK_ADD
+		|| key == VK_SUBTRACT)
+	// clang-format on
+	{
+		return true;
+	}
+
+	return false;
+}
+
 std::wstring CreateGUID()
 {
 	GUID guid;
 	CoCreateGuid(&guid);
 
 	TCHAR guidString[128];
-	StringFromGUID2(guid, guidString, SIZEOF_ARRAY(guidString));
+	StringFromGUID2(guid, guidString, std::size(guidString));
 
 	std::wstring finalValue = guidString;
 	finalValue = finalValue.substr(1, finalValue.length() - 2);
@@ -769,4 +822,25 @@ bool IsWindowsPE()
 	LSTATUS result = RegOpenKeyEx(HKEY_LOCAL_MACHINE, L"System\\ControlSet001\\Control\\MiniNT", 0,
 		KEY_READ, &key);
 	return result == ERROR_SUCCESS;
+}
+
+bool IsProcessRTL()
+{
+	DWORD layout = 0;
+	BOOL res = GetProcessDefaultLayout(&layout);
+
+	if (!res)
+	{
+		LOG_SYSRESULT(GetLastError());
+		DCHECK(false);
+		return false;
+	}
+
+	return (layout == LAYOUT_RTL);
+}
+
+wil::unique_hmodule LoadSystemLibrary(const std::wstring &libraryName)
+{
+	return wil::unique_hmodule(
+		LoadLibraryEx(libraryName.c_str(), nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32));
 }

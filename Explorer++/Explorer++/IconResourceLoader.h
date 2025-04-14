@@ -4,10 +4,12 @@
 
 #pragma once
 
-#include "BetterEnumsWrapper.h"
 #include "Icon.h"
+#include "../Helper/BetterEnumsWrapper.h"
 #include <wil/resource.h>
 #include <gdiplus.h>
+
+class DarkModeManager;
 
 // Note that the values in this enumeration are used when saving/loading the icon set and should not
 // be changed.
@@ -22,7 +24,7 @@ BETTER_ENUM(IconSet, int,
 class IconResourceLoader
 {
 public:
-	IconResourceLoader(IconSet iconSet);
+	IconResourceLoader(IconSet iconSet, const DarkModeManager *darkModeManager);
 
 	wil::unique_hbitmap LoadBitmapFromPNGForDpi(Icon icon, int iconWidth, int iconHeight,
 		int dpi) const;
@@ -32,9 +34,6 @@ public:
 	wil::unique_hicon LoadIconFromPNGAndScale(Icon icon, int iconWidth, int iconHeight) const;
 
 private:
-	wil::unique_hbitmap RetrieveBitmapFromGdiplusBitmap(Gdiplus::Bitmap *gdiplusBitmap) const;
-	wil::unique_hicon RetrieveIconFromGdiplusBitmap(Gdiplus::Bitmap *gdiplusBitmap) const;
-
 	std::unique_ptr<Gdiplus::Bitmap> LoadGdiplusBitmapFromPNGForDpi(Icon icon, int iconWidth,
 		int iconHeight, int dpi) const;
 	std::unique_ptr<Gdiplus::Bitmap> LoadGdiplusBitmapFromPNGAndScalePlusInvert(Icon icon,
@@ -43,4 +42,5 @@ private:
 		int iconHeight) const;
 
 	const IconSet m_iconSet;
+	const DarkModeManager *const m_darkModeManager;
 };

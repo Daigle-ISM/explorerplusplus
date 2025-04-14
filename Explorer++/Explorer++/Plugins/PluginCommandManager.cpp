@@ -4,11 +4,12 @@
 
 #include "stdafx.h"
 #include "Plugins/PluginCommandManager.h"
+#include "AcceleratorManager.h"
 #include "Plugins/Manifest.h"
 
-Plugins::PluginCommandManager::PluginCommandManager(HACCEL *acceleratorTable, int startId,
-	int endId) :
-	m_acceleratorTable(acceleratorTable),
+Plugins::PluginCommandManager::PluginCommandManager(AcceleratorManager *acceleratorManager,
+	int startId, int endId) :
+	m_acceleratorManager(acceleratorManager),
 	m_startId(startId),
 	m_endId(endId),
 	m_idCounter(startId)
@@ -17,11 +18,7 @@ Plugins::PluginCommandManager::PluginCommandManager(HACCEL *acceleratorTable, in
 
 void Plugins::PluginCommandManager::addCommands(int pluginId, const std::vector<Command> &commands)
 {
-	int numAccelerators = CopyAcceleratorTable(*m_acceleratorTable, nullptr, 0);
-
-	std::vector<ACCEL> accelerators(numAccelerators);
-	CopyAcceleratorTable(*m_acceleratorTable, &accelerators[0],
-		static_cast<int>(accelerators.size()));
+	auto accelerators = m_acceleratorManager->GetAccelerators();
 
 	std::unordered_map<int, PluginCommand> registeredCommands;
 
@@ -47,9 +44,9 @@ void Plugins::PluginCommandManager::addCommands(int pluginId, const std::vector<
 			continue;
 		}
 
-		auto id = generateId();
+		auto id = m_idCounter++;
 
-		if (!id)
+		if (m_idCounter >= m_endId)
 		{
 			// There are only a fixed number of accelerator items
 			// available. As accelerators can't be removed, if there are
@@ -61,37 +58,18 @@ void Plugins::PluginCommandManager::addCommands(int pluginId, const std::vector<
 		ACCEL newAccel;
 		newAccel.fVirt = command.accelerator->modifiers;
 		newAccel.key = command.accelerator->key;
-		newAccel.cmd = static_cast<WORD>(*id);
+		newAccel.cmd = static_cast<WORD>(id);
 		accelerators.push_back(newAccel);
 
 		PluginCommand pluginCommand;
 		pluginCommand.pluginId = pluginId;
 		pluginCommand.name = command.name;
-		registeredCommands.insert(std::make_pair(*id, pluginCommand));
+		registeredCommands.insert(std::make_pair(id, pluginCommand));
 	}
 
-	HACCEL newAcceleratorTable =
-		CreateAcceleratorTable(&accelerators[0], static_cast<int>(accelerators.size()));
-
-	if (newAcceleratorTable == nullptr)
-	{
-		return;
-	}
+	m_acceleratorManager->SetAccelerators(accelerators);
 
 	m_registeredCommands.insert(registeredCommands.begin(), registeredCommands.end());
-
-	DestroyAcceleratorTable(*m_acceleratorTable);
-	*m_acceleratorTable = newAcceleratorTable;
-}
-
-std::optional<int> Plugins::PluginCommandManager::generateId()
-{
-	if (m_idCounter >= m_endId)
-	{
-		return std::nullopt;
-	}
-
-	return m_idCounter++;
 }
 
 boost::signals2::connection Plugins::PluginCommandManager::AddCommandInvokedObserver(

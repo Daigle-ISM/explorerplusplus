@@ -9,8 +9,10 @@
 #include "../Helper/RichEditHelper.h"
 #include "../Helper/WindowHelper.h"
 
-ThirdPartyCreditsDialog::ThirdPartyCreditsDialog(HINSTANCE resourceInstance, HWND parent) :
-	ThemedDialog(resourceInstance, IDD_THIRD_PARTY_CREDITS, parent, DialogSizingType::None)
+ThirdPartyCreditsDialog::ThirdPartyCreditsDialog(HINSTANCE resourceInstance, HWND parent,
+	ThemeManager *themeManager) :
+	ThemedDialog(resourceInstance, IDD_THIRD_PARTY_CREDITS, parent, DialogSizingType::None,
+		themeManager)
 {
 }
 
@@ -73,7 +75,7 @@ INT_PTR ThirdPartyCreditsDialog::OnLinkNotification(const ENLINK *linkNotificati
 void ThirdPartyCreditsDialog::OnLinkClicked(const ENLINK *linkNotificationDetails)
 {
 	std::wstring text = GetRichEditLinkText(linkNotificationDetails);
-	ShellExecute(nullptr, L"open", text.c_str(), nullptr, nullptr, SW_SHOW);
+	ShellExecute(nullptr, L"open", text.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
 
 INT_PTR ThirdPartyCreditsDialog::OnClose()

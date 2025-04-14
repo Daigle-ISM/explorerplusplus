@@ -5,9 +5,11 @@
 #include "stdafx.h"
 #include "Controls.h"
 #include "DpiCompatibility.h"
-#include "Macros.h"
+#include "ScopedRedrawDisabler.h"
 #include "WindowHelper.h"
+#include <glog/logging.h>
 #include <VSStyle.h>
+
 // wil/resource.h needs to be included after uxtheme.h to ensure that wil::unique_htheme is defined.
 // clang-format off
 #include <uxtheme.h>
@@ -22,7 +24,7 @@ constexpr int DEFAULT_RADIO_BUTTON_HEIGHT = 13;
 
 HWND CreateListView(HWND hParent, DWORD dwStyle)
 {
-	HWND hListView = CreateWindow(WC_LISTVIEW, EMPTY_STRING, dwStyle, 0, 0, 0, 0, hParent, nullptr,
+	HWND hListView = CreateWindow(WC_LISTVIEW, L"", dwStyle, 0, 0, 0, 0, hParent, nullptr,
 		GetModuleHandle(nullptr), nullptr);
 
 	if (hListView != nullptr)
@@ -38,7 +40,7 @@ HWND CreateListView(HWND hParent, DWORD dwStyle)
 
 HWND CreateTreeView(HWND hParent, DWORD dwStyle)
 {
-	HWND hTreeView = CreateWindow(WC_TREEVIEW, EMPTY_STRING, dwStyle, 0, 0, 0, 0, hParent, nullptr,
+	HWND hTreeView = CreateWindow(WC_TREEVIEW, L"", dwStyle, 0, 0, 0, 0, hParent, nullptr,
 		GetModuleHandle(nullptr), nullptr);
 
 	if (hTreeView != nullptr)
@@ -58,16 +60,16 @@ HWND CreateTreeView(HWND hParent, DWORD dwStyle)
 
 HWND CreateStatusBar(HWND hParent, DWORD dwStyle)
 {
-	HWND hStatusBar = CreateWindow(STATUSCLASSNAME, EMPTY_STRING, dwStyle, 0, 0, 0, 0, hParent,
-		nullptr, GetModuleHandle(nullptr), nullptr);
+	HWND hStatusBar = CreateWindow(STATUSCLASSNAME, L"", dwStyle, 0, 0, 0, 0, hParent, nullptr,
+		GetModuleHandle(nullptr), nullptr);
 
 	return hStatusBar;
 }
 
 HWND CreateToolbar(HWND hParent, DWORD dwStyle, DWORD dwExStyle)
 {
-	HWND hToolbar = CreateWindow(TOOLBARCLASSNAME, EMPTY_STRING, dwStyle, 0, 0, 0, 0, hParent,
-		nullptr, GetModuleHandle(nullptr), nullptr);
+	HWND hToolbar = CreateWindow(TOOLBARCLASSNAME, L"", dwStyle, 0, 0, 0, 0, hParent, nullptr,
+		GetModuleHandle(nullptr), nullptr);
 
 	if (hToolbar != nullptr)
 	{
@@ -80,16 +82,16 @@ HWND CreateToolbar(HWND hParent, DWORD dwStyle, DWORD dwExStyle)
 
 HWND CreateComboBox(HWND parent, DWORD dwStyle)
 {
-	HWND hComboBox = CreateWindowEx(WS_EX_TOOLWINDOW, WC_COMBOBOXEX, EMPTY_STRING, dwStyle, 0, 0, 0,
-		200, parent, nullptr, GetModuleHandle(nullptr), nullptr);
+	HWND hComboBox = CreateWindowEx(WS_EX_TOOLWINDOW, WC_COMBOBOXEX, L"", dwStyle, 0, 0, 0, 200,
+		parent, nullptr, GetModuleHandle(nullptr), nullptr);
 
 	return hComboBox;
 }
 
 HWND CreateTabControl(HWND hParent, DWORD dwStyle)
 {
-	HWND hTabControl = CreateWindowEx(0, WC_TABCONTROL, EMPTY_STRING, dwStyle, 0, 0, 0, 0, hParent,
-		nullptr, GetModuleHandle(nullptr), nullptr);
+	HWND hTabControl = CreateWindowEx(0, WC_TABCONTROL, L"", dwStyle, 0, 0, 0, 0, hParent, nullptr,
+		GetModuleHandle(nullptr), nullptr);
 
 	return hTabControl;
 }
@@ -135,7 +137,7 @@ BOOL AddPathsToComboBoxEx(HWND hComboBoxEx, const TCHAR *path)
 	SendMessage(hComboBoxEx, CB_RESETCONTENT, 0, 0);
 
 	TCHAR findPath[MAX_PATH];
-	StringCchCopy(findPath, SIZEOF_ARRAY(findPath), path);
+	StringCchCopy(findPath, std::size(findPath), path);
 	bRet = PathAppend(findPath, _T("*"));
 
 	if (!bRet)
@@ -211,14 +213,6 @@ BOOL lCheckDlgButton(HWND hDlg, int buttonId, BOOL bCheck)
 	return CheckDlgButton(hDlg, buttonId, uCheck);
 }
 
-void AddStyleToToolbar(UINT *fStyle, UINT fStyleToAdd)
-{
-	if ((*fStyle & fStyleToAdd) != fStyleToAdd)
-	{
-		*fStyle |= fStyleToAdd;
-	}
-}
-
 // It appears that changing the font size in a toolbar doesn't result in the layout being correctly
 // updated. For example, the width of a button won't change, which will cause the text for the
 // button to be cut off if the font size is increased. Also, the toolbar height doesn't always seen
@@ -229,9 +223,7 @@ void AddStyleToToolbar(UINT *fStyle, UINT fStyleToAdd)
 // These issues can be worked around by deleting all buttons in the toolbar and reinserting them.
 void RefreshToolbarAfterFontOrDpiChange(HWND toolbar)
 {
-	SendMessage(toolbar, WM_SETREDRAW, false, 0);
-
-	auto enableRedraw = wil::scope_exit([toolbar] { SendMessage(toolbar, WM_SETREDRAW, true, 0); });
+	ScopedRedrawDisabler redrawDisabler(toolbar);
 
 	struct SavedButton
 	{
@@ -249,7 +241,7 @@ void RefreshToolbarAfterFontOrDpiChange(HWND toolbar)
 
 		if (!res)
 		{
-			assert(false);
+			DCHECK(false);
 			continue;
 		}
 
@@ -264,7 +256,7 @@ void RefreshToolbarAfterFontOrDpiChange(HWND toolbar)
 		savedButtons.push_back(savedButton);
 
 		res = SendMessage(toolbar, TB_DELETEBUTTON, 0, 0);
-		assert(res);
+		DCHECK(res);
 	}
 
 	int index = 0;
@@ -282,92 +274,12 @@ void RefreshToolbarAfterFontOrDpiChange(HWND toolbar)
 
 		if (!res)
 		{
-			assert(false);
+			DCHECK(false);
 			continue;
 		}
 
 		index++;
 	}
-}
-
-void AddGripperStyle(UINT *fStyle, BOOL bAddGripper)
-{
-	if (bAddGripper)
-	{
-		/* Remove the no-gripper style (if present). */
-		if ((*fStyle & RBBS_NOGRIPPER) == RBBS_NOGRIPPER)
-		{
-			*fStyle &= ~RBBS_NOGRIPPER;
-		}
-
-		/* Only add the gripper style if it isn't already present. */
-		if ((*fStyle & RBBS_GRIPPERALWAYS) != RBBS_GRIPPERALWAYS)
-		{
-			*fStyle |= RBBS_GRIPPERALWAYS;
-		}
-	}
-	else
-	{
-		if ((*fStyle & RBBS_GRIPPERALWAYS) == RBBS_GRIPPERALWAYS)
-		{
-			*fStyle &= ~RBBS_GRIPPERALWAYS;
-		}
-
-		if ((*fStyle & RBBS_NOGRIPPER) != RBBS_NOGRIPPER)
-		{
-			*fStyle |= RBBS_NOGRIPPER;
-		}
-	}
-}
-
-// This function should be called when the size of a control contained within a rebar changes. For
-// example, adding or removing buttons from a toolbar will change the toolbar's ideal width (i.e.
-// the width needed to show every button). Changing a control's font can change both its ideal width
-// and its height.
-// Setting the ideal width for a band is important, since when a band is unlocked, clicking the
-// gripper will resize the band to its ideal size, which should match the size of the content in the
-// control.
-// Setting the height is also important, since otherwise, the band may end up being too small or too
-// large.
-void UpdateRebarBandSize(HWND rebar, HWND child, int idealWidth, int height)
-{
-	UINT numBands = static_cast<UINT>(SendMessage(rebar, RB_GETBANDCOUNT, 0, 0));
-
-	REBARBANDINFO bandInfo;
-	std::optional<int> childIndex;
-
-	for (UINT i = 0; i < numBands; i++)
-	{
-		bandInfo = {};
-		bandInfo.cbSize = sizeof(bandInfo);
-		bandInfo.fMask = RBBIM_CHILD | RBBIM_CHILDSIZE;
-		auto res = SendMessage(rebar, RB_GETBANDINFO, i, reinterpret_cast<LPARAM>(&bandInfo));
-
-		if (res == 0)
-		{
-			assert(false);
-			continue;
-		}
-
-		if (bandInfo.hwndChild == child)
-		{
-			childIndex = i;
-			break;
-		}
-	}
-
-	if (!childIndex)
-	{
-		assert(false);
-		return;
-	}
-
-	bandInfo.fMask = RBBIM_IDEALSIZE | RBBIM_CHILDSIZE;
-	bandInfo.cxIdeal = idealWidth;
-	bandInfo.cyMinChild = height;
-	[[maybe_unused]] auto res =
-		SendMessage(rebar, RB_SETBANDINFO, *childIndex, reinterpret_cast<LPARAM>(&bandInfo));
-	assert(res);
 }
 
 SIZE GetCheckboxSize(HWND hwnd)
@@ -417,11 +329,7 @@ bool AddTooltipForControl(HWND tipWnd, HWND control, HINSTANCE resourceInstance,
 	WCHAR *rawString;
 	int numCharacters =
 		LoadString(resourceInstance, stringResourceId, reinterpret_cast<LPWSTR>(&rawString), 0);
-
-	if (numCharacters == 0)
-	{
-		throw std::runtime_error("String resource not found");
-	}
+	CHECK_NE(numCharacters, 0) << "String resource not found";
 
 	std::wstring string(rawString, numCharacters);
 
@@ -459,18 +367,17 @@ void AddItemsToComboBox(HWND comboBox, const std::vector<ComboBoxItem> &items, i
 
 		if (index == CB_ERR)
 		{
-			assert(false);
+			DCHECK(false);
 			continue;
 		}
 
-		[[maybe_unused]] auto res =
-			SendMessage(comboBox, CB_SETITEMDATA, index, static_cast<LPARAM>(item.id));
-		assert(res != CB_ERR);
+		auto res = SendMessage(comboBox, CB_SETITEMDATA, index, static_cast<LPARAM>(item.id));
+		DCHECK(res != CB_ERR);
 
 		if (item.id == currentItemId)
 		{
 			res = SendMessage(comboBox, CB_SETCURSEL, index, 0);
-			assert(res != CB_ERR);
+			DCHECK(res != CB_ERR);
 		}
 	}
 }
@@ -482,7 +389,7 @@ bool DoesComboBoxContainText(HWND comboBox, const std::wstring &text,
 
 	if (numItems == CB_ERR)
 	{
-		assert(false);
+		DCHECK(false);
 		return false;
 	}
 
@@ -492,7 +399,7 @@ bool DoesComboBoxContainText(HWND comboBox, const std::wstring &text,
 
 		if (numCharacters == CB_ERR)
 		{
-			assert(false);
+			DCHECK(false);
 			continue;
 		}
 
@@ -504,7 +411,7 @@ bool DoesComboBoxContainText(HWND comboBox, const std::wstring &text,
 
 		if (numCharacters == CB_ERR)
 		{
-			assert(false);
+			DCHECK(false);
 			continue;
 		}
 

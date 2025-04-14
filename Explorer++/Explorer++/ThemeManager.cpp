@@ -3,33 +3,31 @@
 // See LICENSE in the top level directory
 
 #include "stdafx.h"
+// clang-format off
 #include "ThemeManager.h"
-#include "DarkModeHelper.h"
-#include "Explorer++_internal.h"
+// clang-format on
+#include "Explorer++.h"
+#include "DarkModeManager.h"
 #include "SystemFontHelper.h"
 #include "../Helper/Controls.h"
 #include "../Helper/DpiCompatibility.h"
 #include "../Helper/MenuHelper.h"
 #include "../Helper/WindowHelper.h"
+#include "../Helper/WindowSubclass.h"
+#include <glog/logging.h>
 #include <wil/resource.h>
 #include <vssym32.h>
 
-static const WCHAR DIALOG_CLASS_NAME[] = L"#32770";
-
-ThemeManager &ThemeManager::GetInstance()
+ThemeManager::ThemeManager(DarkModeManager *darkModeManager) : m_darkModeManager(darkModeManager)
 {
-	static ThemeManager themeManager;
-	return themeManager;
-}
-
-ThemeManager::ThemeManager()
-{
-	m_connections.push_back(DarkModeHelper::GetInstance().darkModeStatusChanged.AddObserver(
+	m_connections.push_back(darkModeManager->darkModeStatusChanged.AddObserver(
 		std::bind(&ThemeManager::OnDarkModeStatusChanged, this)));
 }
 
 void ThemeManager::OnDarkModeStatusChanged()
 {
+	m_windowSubclasses.clear();
+
 	for (HWND hwnd : m_trackedTopLevelWindows)
 	{
 		ApplyThemeToWindowAndChildren(hwnd);
@@ -53,7 +51,14 @@ void ThemeManager::UntrackTopLevelWindow(HWND hwnd)
 void ThemeManager::ApplyThemeToWindowAndChildren(HWND hwnd)
 {
 	ApplyThemeToWindow(hwnd);
-	EnumChildWindows(hwnd, ProcessChildWindow, 0);
+	EnumChildWindows(
+		hwnd,
+		[](HWND childWindow, LPARAM lParam)
+		{
+			auto themeManager = reinterpret_cast<ThemeManager *>(lParam);
+			return themeManager->ProcessChildWindow(childWindow);
+		},
+		reinterpret_cast<LPARAM>(this));
 
 	// Tooltip windows won't be enumerated by EnumChildWindows(). They will, however, be enumerated
 	// by EnumThreadWindows(), which is why that's called here.
@@ -61,23 +66,26 @@ void ThemeManager::ApplyThemeToWindowAndChildren(HWND hwnd)
 	// be initialized during the call to EnumChildWindows() (since they won't necessarily exist
 	// initially). Those tooltip windows will then be processed as part of the call to
 	// EnumThreadWindows().
-	EnumThreadWindows(GetCurrentThreadId(), ProcessThreadWindow, 0);
+	EnumThreadWindows(
+		GetCurrentThreadId(),
+		[](HWND threadWindow, LPARAM lParam)
+		{
+			auto themeManager = reinterpret_cast<ThemeManager *>(lParam);
+			return themeManager->ProcessThreadWindow(threadWindow);
+		},
+		reinterpret_cast<LPARAM>(this));
 
 	RedrawWindow(hwnd, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE | RDW_FRAME);
 }
 
-BOOL CALLBACK ThemeManager::ProcessChildWindow(HWND hwnd, LPARAM lParam)
+BOOL ThemeManager::ProcessChildWindow(HWND hwnd)
 {
-	UNREFERENCED_PARAMETER(lParam);
-
 	ApplyThemeToWindow(hwnd);
 	return TRUE;
 }
 
-BOOL CALLBACK ThemeManager::ProcessThreadWindow(HWND hwnd, LPARAM lParam)
+BOOL ThemeManager::ProcessThreadWindow(HWND hwnd)
 {
-	UNREFERENCED_PARAMETER(lParam);
-
 	WCHAR className[256];
 	auto res = GetClassName(hwnd, className, static_cast<int>(std::size(className)));
 
@@ -99,9 +107,8 @@ BOOL CALLBACK ThemeManager::ProcessThreadWindow(HWND hwnd, LPARAM lParam)
 
 void ThemeManager::ApplyThemeToWindow(HWND hwnd)
 {
-	auto &darkModeHelper = DarkModeHelper::GetInstance();
-	bool enableDarkMode = darkModeHelper.IsDarkModeEnabled();
-	darkModeHelper.AllowDarkModeForWindow(hwnd, enableDarkMode);
+	bool enableDarkMode = m_darkModeManager->IsDarkModeEnabled();
+	m_darkModeManager->AllowDarkModeForWindow(hwnd, enableDarkMode);
 
 	// The maximum length of a class name is 256 characters (see the documentation for lpszClassName
 	// in https://learn.microsoft.com/en-au/windows/win32/api/winuser/ns-winuser-wndclassw).
@@ -114,7 +121,7 @@ void ThemeManager::ApplyThemeToWindow(HWND hwnd)
 		return;
 	}
 
-	if (lstrcmp(className, NExplorerplusplus::CLASS_NAME) == 0)
+	if (lstrcmp(className, Explorerplusplus::WINDOW_CLASS_NAME) == 0)
 	{
 		ApplyThemeToMainWindow(hwnd, enableDarkMode);
 	}
@@ -174,12 +181,6 @@ void ThemeManager::ApplyThemeToWindow(HWND hwnd)
 
 void ThemeManager::ApplyThemeToMainWindow(HWND hwnd, bool enableDarkMode)
 {
-	BOOL dark = enableDarkMode;
-	DarkModeHelper::WINDOWCOMPOSITIONATTRIBDATA compositionData = {
-		DarkModeHelper::WCA_USEDARKMODECOLORS, &dark, sizeof(dark)
-	};
-	DarkModeHelper::GetInstance().SetWindowCompositionAttribute(hwnd, &compositionData);
-
 	// There's no need to owner-draw the menu bar if dark mode isn't supported (in practice, this
 	// means that the menu bar will only be owner-drawn on Windows 10 and 11). Additionally,
 	// owner-drawing the menu bar is problematic on Windows 7, for at least two reasons:
@@ -190,12 +191,19 @@ void ThemeManager::ApplyThemeToMainWindow(HWND hwnd, bool enableDarkMode)
 	// the menu bar, rather than providing a DC to paint into.
 	// 2. Visual styles can be turned off, so the current owner-drawing implementation wouldn't work
 	// in that scenario.
-	if (!DarkModeHelper::GetInstance().IsDarkModeSupported())
+	if (!m_darkModeManager->IsDarkModeSupported())
 	{
 		return;
 	}
 
-	SetWindowSubclass(hwnd, MainWindowSubclass, SUBCLASS_ID, 0);
+	BOOL dark = enableDarkMode;
+	DarkModeManager::WINDOWCOMPOSITIONATTRIBDATA compositionData = {
+		DarkModeManager::WCA_USEDARKMODECOLORS, &dark, sizeof(dark)
+	};
+	m_darkModeManager->SetWindowCompositionAttribute(hwnd, &compositionData);
+
+	m_windowSubclasses.push_back(std::make_unique<WindowSubclass>(hwnd,
+		std::bind_front(&ThemeManager::MainWindowSubclass, this)));
 
 	auto mainMenu = GetMenu(hwnd);
 	int numItems = GetMenuItemCount(mainMenu);
@@ -238,23 +246,22 @@ void ThemeManager::ApplyThemeToMainWindow(HWND hwnd, bool enableDarkMode)
 void ThemeManager::ApplyThemeToDialog(HWND hwnd, bool enableDarkMode)
 {
 	BOOL dark = enableDarkMode;
-	DarkModeHelper::WINDOWCOMPOSITIONATTRIBDATA compositionData = {
-		DarkModeHelper::WCA_USEDARKMODECOLORS, &dark, sizeof(dark)
+	DarkModeManager::WINDOWCOMPOSITIONATTRIBDATA compositionData = {
+		DarkModeManager::WCA_USEDARKMODECOLORS, &dark, sizeof(dark)
 	};
-	DarkModeHelper::GetInstance().SetWindowCompositionAttribute(hwnd, &compositionData);
+	m_darkModeManager->SetWindowCompositionAttribute(hwnd, &compositionData);
 
 	if (enableDarkMode)
 	{
-		SetWindowSubclass(hwnd, DialogSubclass, SUBCLASS_ID, 0);
-	}
-	else
-	{
-		RemoveWindowSubclass(hwnd, DialogSubclass, SUBCLASS_ID);
+		m_windowSubclasses.push_back(std::make_unique<WindowSubclass>(hwnd,
+			std::bind_front(&ThemeManager::DialogSubclass, this)));
 	}
 }
 
 void ThemeManager::ApplyThemeToListView(HWND hwnd, bool enableDarkMode)
 {
+	DWORD extendedStyle = ListView_GetExtendedListViewStyle(hwnd);
+
 	if (enableDarkMode)
 	{
 		SetWindowTheme(hwnd, L"ItemsView", nullptr);
@@ -264,13 +271,20 @@ void ThemeManager::ApplyThemeToListView(HWND hwnd, bool enableDarkMode)
 		SetWindowTheme(hwnd, L"Explorer", nullptr);
 	}
 
+	if (WI_IsFlagSet(extendedStyle, LVS_EX_TRANSPARENTBKGND))
+	{
+		// Setting the window theme above will clear the LVS_EX_TRANSPARENTBKGND style. So, if that
+		// style was set, it will be restored here.
+		ListView_SetExtendedListViewStyle(hwnd, extendedStyle);
+	}
+
 	COLORREF backgroundColor;
 	COLORREF textColor;
 
 	if (enableDarkMode)
 	{
-		backgroundColor = DarkModeHelper::BACKGROUND_COLOR;
-		textColor = DarkModeHelper::TEXT_COLOR;
+		backgroundColor = DarkModeManager::BACKGROUND_COLOR;
+		textColor = DarkModeManager::TEXT_COLOR;
 	}
 	else
 	{
@@ -284,11 +298,8 @@ void ThemeManager::ApplyThemeToListView(HWND hwnd, bool enableDarkMode)
 
 	if (enableDarkMode)
 	{
-		SetWindowSubclass(hwnd, ListViewSubclass, SUBCLASS_ID, 0);
-	}
-	else
-	{
-		RemoveWindowSubclass(hwnd, ListViewSubclass, SUBCLASS_ID);
+		m_windowSubclasses.push_back(std::make_unique<WindowSubclass>(hwnd,
+			std::bind_front(&ThemeManager::ListViewSubclass, this)));
 	}
 }
 
@@ -314,9 +325,9 @@ void ThemeManager::ApplyThemeToTreeView(HWND hwnd, bool enableDarkMode)
 
 	if (enableDarkMode)
 	{
-		backgroundColor = DarkModeHelper::BACKGROUND_COLOR;
-		textColor = DarkModeHelper::TEXT_COLOR;
-		insertMarkColor = DarkModeHelper::FOREGROUND_COLOR;
+		backgroundColor = DarkModeManager::BACKGROUND_COLOR;
+		textColor = DarkModeManager::TEXT_COLOR;
+		insertMarkColor = DarkModeManager::FOREGROUND_COLOR;
 	}
 	else
 	{
@@ -337,8 +348,8 @@ void ThemeManager::ApplyThemeToRichEdit(HWND hwnd, bool enableDarkMode)
 
 	if (enableDarkMode)
 	{
-		backgroundColor = DarkModeHelper::BACKGROUND_COLOR;
-		textColor = DarkModeHelper::TEXT_COLOR;
+		backgroundColor = DarkModeManager::BACKGROUND_COLOR;
+		textColor = DarkModeManager::TEXT_COLOR;
 	}
 	else
 	{
@@ -360,21 +371,27 @@ void ThemeManager::ApplyThemeToRebar(HWND hwnd, bool enableDarkMode)
 {
 	if (enableDarkMode)
 	{
-		SetWindowSubclass(hwnd, RebarSubclass, SUBCLASS_ID, 0);
-	}
-	else
-	{
-		RemoveWindowSubclass(hwnd, RebarSubclass, SUBCLASS_ID);
+		m_windowSubclasses.push_back(std::make_unique<WindowSubclass>(hwnd,
+			std::bind_front(&ThemeManager::RebarSubclass, this)));
 	}
 }
 
 void ThemeManager::ApplyThemeToToolbar(HWND hwnd, bool enableDarkMode)
 {
+	// Without this, the DarkMode::Toolbar theme may be applied in dark mode. That theme is
+	// problematic (e.g. it results in dropdown buttons being drawn incorrectly, see #519). This
+	// call will ensure that the default theme (i.e. Toolbar) will be used in both light mode and
+	// dark mode.
+	//
+	// Using the default theme is fine, since dark mode is implemented in other ways (e.g. by custom
+	// drawing).
+	SetWindowTheme(hwnd, L"", nullptr);
+
 	COLORREF insertMarkColor;
 
 	if (enableDarkMode)
 	{
-		insertMarkColor = DarkModeHelper::FOREGROUND_COLOR;
+		insertMarkColor = DarkModeManager::FOREGROUND_COLOR;
 	}
 	else
 	{
@@ -395,13 +412,14 @@ void ThemeManager::ApplyThemeToToolbar(HWND hwnd, bool enableDarkMode)
 
 	if (enableDarkMode)
 	{
-		// This may be called multiple times (if there's more than one toolbar in a particular
-		// window), but that's not an issue, as the subclass will only be installed once.
-		SetWindowSubclass(parent, ToolbarParentSubclass, SUBCLASS_ID, 0);
-	}
-	else
-	{
-		RemoveWindowSubclass(parent, ToolbarParentSubclass, SUBCLASS_ID);
+		// Note that the parent window may end up being subclassed multiple times. That shouldn't
+		// have any correctness issues, since when receiving the relevant drawing messages, one of
+		// the subclasses (it's not specified which) will perform the appropriate handling. It is
+		// inefficient generally, since each subclass will be invoked for other messages as well.
+		// That shouldn't be too much of an issue, since there's only a limited number of toolbars,
+		// so the number of extraneous subclasses won't be very high.
+		m_windowSubclasses.push_back(std::make_unique<WindowSubclass>(parent,
+			std::bind_front(&ThemeManager::ToolbarParentSubclass, this)));
 	}
 }
 
@@ -409,11 +427,8 @@ void ThemeManager::ApplyThemeToComboBoxEx(HWND hwnd, bool enableDarkMode)
 {
 	if (enableDarkMode)
 	{
-		SetWindowSubclass(hwnd, ComboBoxExSubclass, SUBCLASS_ID, 0);
-	}
-	else
-	{
-		RemoveWindowSubclass(hwnd, ComboBoxExSubclass, SUBCLASS_ID);
+		m_windowSubclasses.push_back(std::make_unique<WindowSubclass>(hwnd,
+			std::bind_front(&ThemeManager::ComboBoxExSubclass, this)));
 	}
 }
 
@@ -446,11 +461,8 @@ void ThemeManager::ApplyThemeToButton(HWND hwnd, bool enableDarkMode)
 	{
 		if (enableDarkMode)
 		{
-			SetWindowSubclass(hwnd, GroupBoxSubclass, SUBCLASS_ID, 0);
-		}
-		else
-		{
-			RemoveWindowSubclass(hwnd, GroupBoxSubclass, SUBCLASS_ID);
+			m_windowSubclasses.push_back(std::make_unique<WindowSubclass>(hwnd,
+				std::bind_front(&ThemeManager::GroupBoxSubclass, this)));
 		}
 	}
 }
@@ -482,22 +494,16 @@ void ThemeManager::ApplyThemeToScrollBar(HWND hwnd, bool enableDarkMode)
 	{
 		if (enableDarkMode)
 		{
-			SetWindowSubclass(hwnd, ScrollBarSubclass, SUBCLASS_ID, 0);
-		}
-		else
-		{
-			RemoveWindowSubclass(hwnd, ScrollBarSubclass, SUBCLASS_ID);
+			m_windowSubclasses.push_back(std::make_unique<WindowSubclass>(hwnd,
+				std::bind_front(&ThemeManager::ScrollBarSubclass, this)));
 		}
 	}
 }
 
-LRESULT CALLBACK ThemeManager::MainWindowSubclass(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
-	UINT_PTR subclassId, DWORD_PTR data)
+LRESULT ThemeManager::MainWindowSubclass(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-	UNREFERENCED_PARAMETER(data);
-
 	static wil::unique_htheme theme(OpenThemeData(hwnd, L"Menu"));
-	static wil::unique_hbrush hotBrush(CreateSolidBrush(DarkModeHelper::HOT_ITEM_HIGHLIGHT_COLOR));
+	static wil::unique_hbrush hotBrush(CreateSolidBrush(DarkModeManager::HOT_ITEM_HIGHLIGHT_COLOR));
 	static constexpr DWORD drawFlagsBase = DT_CENTER | DT_VCENTER | DT_SINGLELINE;
 	static bool alwaysShowAccessKeys = ShouldAlwaysShowAccessKeys();
 
@@ -522,11 +528,6 @@ LRESULT CALLBACK ThemeManager::MainWindowSubclass(HWND hwnd, UINT msg, WPARAM wP
 		auto text =
 			MenuHelper::GetMenuItemString(menu, static_cast<UINT>(measureItem->itemData), true);
 
-		if (!text)
-		{
-			throw std::runtime_error("Menu item text retrieval failed");
-		}
-
 		auto logFont = GetSystemFontScaledToWindow(SystemFont::Menu, hwnd);
 		wil::unique_hfont font(CreateFontIndirect(&logFont));
 		wil::unique_select_object selectFont;
@@ -540,7 +541,7 @@ LRESULT CALLBACK ThemeManager::MainWindowSubclass(HWND hwnd, UINT msg, WPARAM wP
 
 		RECT textRect;
 		[[maybe_unused]] HRESULT hr = GetThemeTextExtent(theme.get(), hdc.get(), MENU_BARITEM,
-			MBI_NORMAL, text->c_str(), -1, drawFlagsBase, nullptr, &textRect);
+			MBI_NORMAL, text.c_str(), -1, drawFlagsBase, nullptr, &textRect);
 		assert(SUCCEEDED(hr));
 
 		measureItem->itemWidth = GetRectWidth(&textRect);
@@ -596,7 +597,7 @@ LRESULT CALLBACK ThemeManager::MainWindowSubclass(HWND hwnd, UINT msg, WPARAM wP
 			}
 		}
 
-		bool darkModeEnabled = DarkModeHelper::GetInstance().IsDarkModeEnabled();
+		bool darkModeEnabled = m_darkModeManager->IsDarkModeEnabled();
 		bool selected = false;
 		bool selectionPartiallyTransparent = false;
 
@@ -651,11 +652,6 @@ LRESULT CALLBACK ThemeManager::MainWindowSubclass(HWND hwnd, UINT msg, WPARAM wP
 		auto text =
 			MenuHelper::GetMenuItemString(menu, static_cast<UINT>(drawItem->itemData), true);
 
-		if (!text)
-		{
-			throw std::runtime_error("Menu item text retrieval failed");
-		}
-
 		DWORD drawFlags = drawFlagsBase;
 
 		// It appears that Windows passes in the ODS_NOACCEL flag even when the access keys option
@@ -677,18 +673,18 @@ LRESULT CALLBACK ThemeManager::MainWindowSubclass(HWND hwnd, UINT msg, WPARAM wP
 			if (itemState == MBI_DISABLED || itemState == MBI_DISABLEDHOT
 				|| itemState == MBI_DISABLEDPUSHED)
 			{
-				textColor = DarkModeHelper::TEXT_COLOR_DISABLED;
+				textColor = DarkModeManager::TEXT_COLOR_DISABLED;
 			}
 			else
 			{
-				textColor = DarkModeHelper::TEXT_COLOR;
+				textColor = DarkModeManager::TEXT_COLOR;
 			}
 
 			options.crText = textColor;
 		}
 
 		[[maybe_unused]] HRESULT hr = DrawThemeTextEx(theme.get(), drawItem->hDC, MENU_BARITEM,
-			itemState, text->c_str(), -1, drawFlags, &drawItem->rcItem, &options);
+			itemState, text.c_str(), -1, drawFlags, &drawItem->rcItem, &options);
 		assert(SUCCEEDED(hr));
 
 		return TRUE;
@@ -719,7 +715,7 @@ LRESULT CALLBACK ThemeManager::MainWindowSubclass(HWND hwnd, UINT msg, WPARAM wP
 	case WM_NCPAINT:
 	case WM_NCACTIVATE:
 	{
-		if (!DarkModeHelper::GetInstance().IsDarkModeEnabled())
+		if (!m_darkModeManager->IsDarkModeEnabled())
 		{
 			break;
 		}
@@ -741,16 +737,9 @@ LRESULT CALLBACK ThemeManager::MainWindowSubclass(HWND hwnd, UINT msg, WPARAM wP
 		OffsetRect(&menuBarBorderRect, -windowRect.left, -windowRect.top);
 
 		auto hdc = wil::GetWindowDC(hwnd);
-		FillRect(hdc.get(), &menuBarBorderRect, DarkModeHelper::GetInstance().GetBackgroundBrush());
+		FillRect(hdc.get(), &menuBarBorderRect, m_darkModeManager->GetBackgroundBrush());
 
 		return defWindowProcResult;
-	}
-	break;
-
-	case WM_NCDESTROY:
-	{
-		[[maybe_unused]] auto res = RemoveWindowSubclass(hwnd, MainWindowSubclass, subclassId);
-		assert(res);
 	}
 	break;
 	}
@@ -762,13 +751,13 @@ HBRUSH ThemeManager::GetMenuBarBackgroundBrush(bool enableDarkMode)
 {
 	if (enableDarkMode)
 	{
-		return DarkModeHelper::GetInstance().GetBackgroundBrush();
+		return m_darkModeManager->GetBackgroundBrush();
 	}
 	else
 	{
 		int systemColorIndex;
 
-		if (DarkModeHelper::IsHighContrast())
+		if (DarkModeManager::IsHighContrast())
 		{
 			systemColorIndex = COLOR_BTNFACE;
 		}
@@ -795,11 +784,8 @@ bool ThemeManager::ShouldAlwaysShowAccessKeys()
 	return alwaysShow;
 }
 
-LRESULT CALLBACK ThemeManager::DialogSubclass(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
-	UINT_PTR subclassId, DWORD_PTR data)
+LRESULT ThemeManager::DialogSubclass(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-	UNREFERENCED_PARAMETER(data);
-
 	switch (msg)
 	{
 	case WM_CTLCOLORDLG:
@@ -809,9 +795,9 @@ LRESULT CALLBACK ThemeManager::DialogSubclass(HWND hwnd, UINT msg, WPARAM wParam
 	case WM_CTLCOLORBTN:
 	{
 		auto hdc = reinterpret_cast<HDC>(wParam);
-		SetBkColor(hdc, DarkModeHelper::BACKGROUND_COLOR);
-		SetTextColor(hdc, DarkModeHelper::TEXT_COLOR);
-		return reinterpret_cast<LRESULT>(DarkModeHelper::GetInstance().GetBackgroundBrush());
+		SetBkColor(hdc, DarkModeManager::BACKGROUND_COLOR);
+		SetTextColor(hdc, DarkModeManager::TEXT_COLOR);
+		return reinterpret_cast<LRESULT>(m_darkModeManager->GetBackgroundBrush());
 	}
 	break;
 
@@ -826,23 +812,13 @@ LRESULT CALLBACK ThemeManager::DialogSubclass(HWND hwnd, UINT msg, WPARAM wParam
 		}
 	}
 	break;
-
-	case WM_NCDESTROY:
-	{
-		[[maybe_unused]] auto res = RemoveWindowSubclass(hwnd, DialogSubclass, subclassId);
-		assert(res);
-	}
-	break;
 	}
 
 	return DefSubclassProc(hwnd, msg, wParam, lParam);
 }
 
-LRESULT CALLBACK ThemeManager::ToolbarParentSubclass(HWND hwnd, UINT msg, WPARAM wParam,
-	LPARAM lParam, UINT_PTR subclassId, DWORD_PTR data)
+LRESULT ThemeManager::ToolbarParentSubclass(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-	UNREFERENCED_PARAMETER(data);
-
 	switch (msg)
 	{
 	case WM_NOTIFY:
@@ -854,13 +830,6 @@ LRESULT CALLBACK ThemeManager::ToolbarParentSubclass(HWND hwnd, UINT msg, WPARAM
 		case NM_CUSTOMDRAW:
 			return OnCustomDraw(reinterpret_cast<NMCUSTOMDRAW *>(lParam));
 		}
-	}
-	break;
-
-	case WM_NCDESTROY:
-	{
-		[[maybe_unused]] auto res = RemoveWindowSubclass(hwnd, ToolbarParentSubclass, subclassId);
-		assert(res);
 	}
 	break;
 	}
@@ -940,11 +909,11 @@ LRESULT ThemeManager::OnButtonCustomDraw(NMCUSTOMDRAW *customDraw)
 
 		if (IsWindowEnabled(customDraw->hdr.hwndFrom))
 		{
-			textColor = DarkModeHelper::TEXT_COLOR;
+			textColor = DarkModeManager::TEXT_COLOR;
 		}
 		else
 		{
-			textColor = DarkModeHelper::TEXT_COLOR_DISABLED;
+			textColor = DarkModeManager::TEXT_COLOR_DISABLED;
 		}
 
 		SetTextColor(customDraw->hdc, textColor);
@@ -989,34 +958,24 @@ LRESULT ThemeManager::OnToolbarCustomDraw(NMTBCUSTOMDRAW *customDraw)
 		return CDRF_NOTIFYITEMDRAW;
 
 	case CDDS_ITEMPREPAINT:
-		customDraw->clrText = DarkModeHelper::TEXT_COLOR;
-		customDraw->clrHighlightHotTrack = DarkModeHelper::HOT_ITEM_HIGHLIGHT_COLOR;
+		customDraw->clrText = DarkModeManager::TEXT_COLOR;
+		customDraw->clrHighlightHotTrack = DarkModeManager::HOT_ITEM_HIGHLIGHT_COLOR;
 		return TBCDRF_USECDCOLORS | TBCDRF_HILITEHOTTRACK;
 	}
 
 	return CDRF_DODEFAULT;
 }
 
-LRESULT CALLBACK ThemeManager::ComboBoxExSubclass(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
-	UINT_PTR subclassId, DWORD_PTR data)
+LRESULT ThemeManager::ComboBoxExSubclass(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-	UNREFERENCED_PARAMETER(data);
-
 	switch (msg)
 	{
 	case WM_CTLCOLOREDIT:
 	{
 		auto hdc = reinterpret_cast<HDC>(wParam);
 		SetBkMode(hdc, TRANSPARENT);
-		SetTextColor(hdc, DarkModeHelper::TEXT_COLOR);
+		SetTextColor(hdc, DarkModeManager::TEXT_COLOR);
 		return reinterpret_cast<LRESULT>(GetComboBoxExBackgroundBrush());
-	}
-	break;
-
-	case WM_NCDESTROY:
-	{
-		[[maybe_unused]] auto res = RemoveWindowSubclass(hwnd, ComboBoxExSubclass, subclassId);
-		assert(res);
 	}
 	break;
 	}
@@ -1036,11 +995,8 @@ HBRUSH ThemeManager::GetComboBoxExBackgroundBrush()
 	return backgroundBrush.get();
 }
 
-LRESULT CALLBACK ThemeManager::ListViewSubclass(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
-	UINT_PTR subclassId, DWORD_PTR data)
+LRESULT ThemeManager::ListViewSubclass(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-	UNREFERENCED_PARAMETER(data);
-
 	switch (msg)
 	{
 	case WM_NOTIFY:
@@ -1056,30 +1012,20 @@ LRESULT CALLBACK ThemeManager::ListViewSubclass(HWND hwnd, UINT msg, WPARAM wPar
 				return CDRF_NOTIFYITEMDRAW;
 
 			case CDDS_ITEMPREPAINT:
-				SetTextColor(customDraw->hdc, DarkModeHelper::TEXT_COLOR);
+				SetTextColor(customDraw->hdc, DarkModeManager::TEXT_COLOR);
 				return CDRF_NEWFONT;
 			}
 		}
 		break;
 		}
 		break;
-
-	case WM_NCDESTROY:
-	{
-		[[maybe_unused]] auto res = RemoveWindowSubclass(hwnd, ListViewSubclass, subclassId);
-		assert(res);
-	}
-	break;
 	}
 
 	return DefSubclassProc(hwnd, msg, wParam, lParam);
 }
 
-LRESULT CALLBACK ThemeManager::RebarSubclass(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
-	UINT_PTR subclassId, DWORD_PTR data)
+LRESULT ThemeManager::RebarSubclass(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-	UNREFERENCED_PARAMETER(data);
-
 	switch (msg)
 	{
 	case WM_ERASEBKGND:
@@ -1088,16 +1034,9 @@ LRESULT CALLBACK ThemeManager::RebarSubclass(HWND hwnd, UINT msg, WPARAM wParam,
 
 		RECT rc;
 		GetClientRect(hwnd, &rc);
-		FillRect(hdc, &rc, DarkModeHelper::GetInstance().GetBackgroundBrush());
+		FillRect(hdc, &rc, m_darkModeManager->GetBackgroundBrush());
 
 		return 1;
-	}
-	break;
-
-	case WM_NCDESTROY:
-	{
-		[[maybe_unused]] auto res = RemoveWindowSubclass(hwnd, RebarSubclass, subclassId);
-		assert(res);
 	}
 	break;
 	}
@@ -1105,11 +1044,8 @@ LRESULT CALLBACK ThemeManager::RebarSubclass(HWND hwnd, UINT msg, WPARAM wParam,
 	return DefSubclassProc(hwnd, msg, wParam, lParam);
 }
 
-LRESULT CALLBACK ThemeManager::GroupBoxSubclass(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
-	UINT_PTR subclassId, DWORD_PTR data)
+LRESULT ThemeManager::GroupBoxSubclass(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-	UNREFERENCED_PARAMETER(data);
-
 	switch (msg)
 	{
 	case WM_PAINT:
@@ -1124,7 +1060,7 @@ LRESULT CALLBACK ThemeManager::GroupBoxSubclass(HWND hwnd, UINT msg, WPARAM wPar
 		assert(!text.empty());
 
 		SetBkMode(hdc, TRANSPARENT);
-		SetTextColor(hdc, DarkModeHelper::TEXT_COLOR);
+		SetTextColor(hdc, DarkModeManager::TEXT_COLOR);
 
 		auto font = reinterpret_cast<HFONT>(SendMessage(hwnd, WM_GETFONT, 0, 0));
 		wil::unique_select_object selectFont;
@@ -1164,23 +1100,13 @@ LRESULT CALLBACK ThemeManager::GroupBoxSubclass(HWND hwnd, UINT msg, WPARAM wPar
 		EndPaint(hwnd, &ps);
 	}
 		return 0;
-
-	case WM_NCDESTROY:
-	{
-		[[maybe_unused]] auto res = RemoveWindowSubclass(hwnd, GroupBoxSubclass, subclassId);
-		assert(res);
-	}
-	break;
 	}
 
 	return DefSubclassProc(hwnd, msg, wParam, lParam);
 }
 
-LRESULT CALLBACK ThemeManager::ScrollBarSubclass(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
-	UINT_PTR subclassId, DWORD_PTR data)
+LRESULT ThemeManager::ScrollBarSubclass(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-	UNREFERENCED_PARAMETER(data);
-
 	switch (msg)
 	{
 	case WM_PAINT:
@@ -1217,13 +1143,6 @@ LRESULT CALLBACK ThemeManager::ScrollBarSubclass(HWND hwnd, UINT msg, WPARAM wPa
 		EndPaint(hwnd, &ps);
 	}
 		return 0;
-
-	case WM_NCDESTROY:
-	{
-		[[maybe_unused]] auto res = RemoveWindowSubclass(hwnd, ScrollBarSubclass, subclassId);
-		assert(res);
-	}
-	break;
 	}
 
 	return DefSubclassProc(hwnd, msg, wParam, lParam);

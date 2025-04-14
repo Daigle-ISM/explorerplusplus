@@ -4,15 +4,16 @@
 
 #include "stdafx.h"
 #include "Explorer++.h"
+#include "App.h"
 #include "Config.h"
 #include "FeatureList.h"
 #include "MainResource.h"
-#include "ShellBrowser/ShellBrowser.h"
+#include "ShellBrowser/ShellBrowserImpl.h"
 #include "ShellBrowser/ShellNavigationController.h"
 #include "ShellBrowser/ViewModes.h"
 #include "ShellTreeView/ShellTreeView.h"
 #include "SortMenuBuilder.h"
-#include "TabContainer.h"
+#include "TabContainerImpl.h"
 #include "../Helper/MenuHelper.h"
 
 void Explorerplusplus::UpdateWindowStates(const Tab &tab)
@@ -27,18 +28,19 @@ void Explorerplusplus::UpdateWindowStates(const Tab &tab)
  */
 void Explorerplusplus::SetProgramMenuItemStates(HMENU hProgramMenu)
 {
-	const Tab &tab = GetActivePane()->GetTabContainer()->GetSelectedTab();
+	const Tab &tab = GetActivePane()->GetTabContainerImpl()->GetSelectedTab();
 
-	ViewMode viewMode = tab.GetShellBrowser()->GetViewMode();
-	bool virtualFolder = tab.GetShellBrowser()->InVirtualFolder();
+	ViewMode viewMode = tab.GetShellBrowserImpl()->GetViewMode();
+	bool virtualFolder = tab.GetShellBrowserImpl()->InVirtualFolder();
 
-	int numSelected = tab.GetShellBrowser()->GetNumSelected();
+	int numSelected = tab.GetShellBrowserImpl()->GetNumSelected();
 	bool anySelected = (numSelected > 0);
 
 	MenuHelper::EnableItem(hProgramMenu, IDM_FILE_COPYITEMPATH, AnyItemsSelected());
 	MenuHelper::EnableItem(hProgramMenu, IDM_FILE_COPYUNIVERSALFILEPATHS, AnyItemsSelected());
 	MenuHelper::EnableItem(hProgramMenu, IDM_FILE_SETFILEATTRIBUTES, AnyItemsSelected());
 	MenuHelper::EnableItem(hProgramMenu, IDM_FILE_OPENCOMMANDPROMPT, !virtualFolder);
+	MenuHelper::EnableItem(hProgramMenu, IDM_FILE_OPENCOMMANDPROMPTADMINISTRATOR, !virtualFolder);
 	MenuHelper::EnableItem(hProgramMenu, IDM_FILE_SAVEDIRECTORYLISTING, !virtualFolder);
 	MenuHelper::EnableItem(hProgramMenu, IDM_FILE_COPYCOLUMNTEXT,
 		anySelected && (viewMode == +ViewMode::Details));
@@ -49,9 +51,10 @@ void Explorerplusplus::SetProgramMenuItemStates(HMENU hProgramMenu)
 	MenuHelper::EnableItem(hProgramMenu, IDM_FILE_PROPERTIES, CanShowFileProperties());
 
 	MenuHelper::EnableItem(hProgramMenu, IDM_EDIT_UNDO, m_FileActionHandler.CanUndo());
-	MenuHelper::EnableItem(hProgramMenu, IDM_EDIT_PASTE, CanPaste());
-	MenuHelper::EnableItem(hProgramMenu, IDM_EDIT_PASTESHORTCUT, CanPasteShortcut());
-	MenuHelper::EnableItem(hProgramMenu, IDM_EDIT_PASTEHARDLINK, CanPaste());
+	MenuHelper::EnableItem(hProgramMenu, IDM_EDIT_PASTE, CanPaste(PasteType::Normal));
+	MenuHelper::EnableItem(hProgramMenu, IDM_EDIT_PASTESHORTCUT, CanPaste(PasteType::Shortcut));
+	MenuHelper::EnableItem(hProgramMenu, IDM_EDIT_PASTEHARDLINK, CanPasteLink());
+	MenuHelper::EnableItem(hProgramMenu, IDM_EDIT_PASTE_SYMBOLIC_LINK, CanPasteLink());
 
 	/* The following menu items are only enabled when one
 	or more files are selected (they represent file
@@ -66,22 +69,22 @@ void Explorerplusplus::SetProgramMenuItemStates(HMENU hProgramMenu)
 	MenuHelper::EnableItem(hProgramMenu, IDM_EDIT_SELECTNONE, anySelected);
 	MenuHelper::EnableItem(hProgramMenu, IDM_EDIT_RESOLVELINK, anySelected);
 
-	if (FeatureList::GetInstance()->IsEnabled(Feature::DualPane))
+	if (m_app->GetFeatureList()->IsEnabled(Feature::DualPane))
 	{
 		MenuHelper::CheckItem(hProgramMenu, IDM_VIEW_DUAL_PANE, m_config->dualPane);
 	}
 
 	MenuHelper::CheckItem(hProgramMenu, IDM_VIEW_STATUSBAR, m_config->showStatusBar);
 	MenuHelper::CheckItem(hProgramMenu, IDM_VIEW_FOLDERS, m_config->showFolders.get());
-	MenuHelper::CheckItem(hProgramMenu, IDM_VIEW_DISPLAYWINDOW, m_config->showDisplayWindow);
-	MenuHelper::CheckItem(hProgramMenu, IDM_TOOLBARS_ADDRESSBAR, m_config->showAddressBar);
-	MenuHelper::CheckItem(hProgramMenu, IDM_TOOLBARS_MAINTOOLBAR, m_config->showMainToolbar);
+	MenuHelper::CheckItem(hProgramMenu, IDM_VIEW_DISPLAYWINDOW, m_config->showDisplayWindow.get());
+	MenuHelper::CheckItem(hProgramMenu, IDM_TOOLBARS_ADDRESSBAR, m_config->showAddressBar.get());
+	MenuHelper::CheckItem(hProgramMenu, IDM_TOOLBARS_MAINTOOLBAR, m_config->showMainToolbar.get());
 	MenuHelper::CheckItem(hProgramMenu, IDM_TOOLBARS_BOOKMARKSTOOLBAR,
-		m_config->showBookmarksToolbar);
-	MenuHelper::CheckItem(hProgramMenu, IDM_TOOLBARS_DRIVES, m_config->showDrivesToolbar);
+		m_config->showBookmarksToolbar.get());
+	MenuHelper::CheckItem(hProgramMenu, IDM_TOOLBARS_DRIVES, m_config->showDrivesToolbar.get());
 	MenuHelper::CheckItem(hProgramMenu, IDM_TOOLBARS_APPLICATIONTOOLBAR,
-		m_config->showApplicationToolbar);
-	MenuHelper::CheckItem(hProgramMenu, IDM_TOOLBARS_LOCKTOOLBARS, m_config->lockToolbars);
+		m_config->showApplicationToolbar.get());
+	MenuHelper::CheckItem(hProgramMenu, IDM_TOOLBARS_LOCKTOOLBARS, m_config->lockToolbars.get());
 
 	auto &mainFont = m_config->mainFont.get();
 	MenuHelper::EnableItem(hProgramMenu, IDM_VIEW_DECREASE_TEXT_SIZE,
@@ -90,27 +93,27 @@ void Explorerplusplus::SetProgramMenuItemStates(HMENU hProgramMenu)
 		!mainFont || mainFont->GetSize() < CustomFont::MAXIMUM_SIZE);
 
 	MenuHelper::CheckItem(hProgramMenu, IDM_VIEW_SHOWHIDDENFILES,
-		tab.GetShellBrowser()->GetShowHidden());
+		tab.GetShellBrowserImpl()->GetShowHidden());
 	MenuHelper::CheckItem(hProgramMenu, IDM_FILTER_APPLYFILTER,
-		tab.GetShellBrowser()->IsFilterApplied());
+		tab.GetShellBrowserImpl()->IsFilterApplied());
 
 	MenuHelper::EnableItem(hProgramMenu, IDM_ACTIONS_NEWFOLDER, CanCreate());
 	MenuHelper::EnableItem(hProgramMenu, IDM_ACTIONS_SPLITFILE,
-		(tab.GetShellBrowser()->GetNumSelectedFiles() == 1) && !virtualFolder);
+		(tab.GetShellBrowserImpl()->GetNumSelectedFiles() == 1) && !virtualFolder);
 	MenuHelper::EnableItem(hProgramMenu, IDM_ACTIONS_MERGEFILES,
-		tab.GetShellBrowser()->GetNumSelectedFiles() > 1);
+		tab.GetShellBrowserImpl()->GetNumSelectedFiles() > 1);
 	MenuHelper::EnableItem(hProgramMenu, IDM_ACTIONS_DESTROYFILES, anySelected);
 
 	UINT itemToCheck = GetViewModeMenuId(viewMode);
-	CheckMenuRadioItem(hProgramMenu, IDM_VIEW_THUMBNAILS, IDM_VIEW_EXTRALARGEICONS, itemToCheck,
+	CheckMenuRadioItem(hProgramMenu, IDM_VIEW_EXTRALARGEICONS, IDM_VIEW_TILES, itemToCheck,
 		MF_BYCOMMAND);
 
 	MenuHelper::EnableItem(hProgramMenu, IDM_GO_BACK,
-		tab.GetShellBrowser()->GetNavigationController()->CanGoBack());
+		tab.GetShellBrowserImpl()->GetNavigationController()->CanGoBack());
 	MenuHelper::EnableItem(hProgramMenu, IDM_GO_FORWARD,
-		tab.GetShellBrowser()->GetNavigationController()->CanGoForward());
-	MenuHelper::EnableItem(hProgramMenu, IDM_GO_UPONELEVEL,
-		tab.GetShellBrowser()->GetNavigationController()->CanGoUp());
+		tab.GetShellBrowserImpl()->GetNavigationController()->CanGoForward());
+	MenuHelper::EnableItem(hProgramMenu, IDM_GO_UP,
+		tab.GetShellBrowserImpl()->GetNavigationController()->CanGoUp());
 
 	MenuHelper::EnableItem(hProgramMenu, IDM_VIEW_AUTOSIZECOLUMNS, viewMode == +ViewMode::Details);
 
@@ -137,10 +140,10 @@ void Explorerplusplus::SetProgramMenuItemStates(HMENU hProgramMenu)
 
 		MenuHelper::EnableItem(hProgramMenu, IDM_VIEW_AUTOARRANGE, TRUE);
 		MenuHelper::CheckItem(hProgramMenu, IDM_VIEW_AUTOARRANGE,
-			tab.GetShellBrowser()->GetAutoArrange());
+			tab.GetShellBrowserImpl()->GetAutoArrange());
 	}
 
-	SortMenuBuilder sortMenuBuilder(m_resourceInstance);
+	SortMenuBuilder sortMenuBuilder(m_app->GetResourceInstance());
 	auto [sortByMenu, groupByMenu] = sortMenuBuilder.BuildMenus(tab);
 
 	MenuHelper::AttachSubMenu(hProgramMenu, std::move(sortByMenu), IDM_VIEW_SORTBY, FALSE);

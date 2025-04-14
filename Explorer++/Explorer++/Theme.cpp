@@ -5,9 +5,10 @@
 #include "stdafx.h"
 #include "Theme.h"
 #include "MainResource.h"
-#include "ResourceHelper.h"
+#include "ResourceLoader.h"
+#include <glog/logging.h>
 
-std::wstring GetThemeText(Theme theme, HINSTANCE resourceInstance)
+std::wstring GetThemeText(Theme theme, const ResourceLoader *resourceLoader)
 {
 	UINT stringId;
 
@@ -26,8 +27,9 @@ std::wstring GetThemeText(Theme theme, HINSTANCE resourceInstance)
 		break;
 
 	default:
-		throw std::runtime_error("Theme value not found");
+		LOG(FATAL) << "Theme value not found";
+		__assume(0);
 	}
 
-	return ResourceHelper::LoadString(resourceInstance, stringId);
+	return resourceLoader->LoadString(stringId);
 }

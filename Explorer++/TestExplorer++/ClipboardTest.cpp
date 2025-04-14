@@ -4,6 +4,7 @@
 
 #include "pch.h"
 #include "../Helper/Clipboard.h"
+#include "ImageTestHelper.h"
 #include <gtest/gtest.h>
 
 using namespace testing;
@@ -29,6 +30,44 @@ TEST_F(ClipboardTest, ReadWriteText)
 	auto clipboardText = m_clipboard.ReadText();
 	ASSERT_NE(clipboardText, std::nullopt);
 	EXPECT_EQ(*clipboardText, text);
+}
+
+TEST_F(ClipboardTest, ReadWriteHDropData)
+{
+	std::vector<std::wstring> files = { L"C:\\file1", L"C:\\file2", L"C:\\file3" };
+	auto res = m_clipboard.WriteHDropData(files);
+	ASSERT_TRUE(res);
+
+	auto retrievedFiles = m_clipboard.ReadHDropData();
+	EXPECT_EQ(retrievedFiles, files);
+}
+
+TEST_F(ClipboardTest, ReadWritePngData)
+{
+	std::unique_ptr<Gdiplus::Bitmap> bitmap;
+	BuildTestGdiplusBitmap(100, 100, bitmap);
+
+	auto res = m_clipboard.WritePng(bitmap.get());
+	ASSERT_TRUE(res);
+
+	auto retrievedBitmap = m_clipboard.ReadPng();
+	ASSERT_NE(retrievedBitmap, nullptr);
+
+	EXPECT_TRUE(AreGdiplusBitmapsEquivalent(bitmap.get(), retrievedBitmap.get()));
+}
+
+TEST_F(ClipboardTest, ReadWriteDIBData)
+{
+	std::unique_ptr<Gdiplus::Bitmap> bitmap;
+	BuildTestGdiplusBitmap(100, 100, bitmap);
+
+	auto res = m_clipboard.WriteDIB(bitmap.get());
+	ASSERT_TRUE(res);
+
+	auto retrievedBitmap = m_clipboard.ReadDIB();
+	ASSERT_NE(retrievedBitmap, nullptr);
+
+	EXPECT_TRUE(AreGdiplusBitmapsEquivalent(bitmap.get(), retrievedBitmap.get()));
 }
 
 TEST_F(ClipboardTest, ReadWriteCustomData)

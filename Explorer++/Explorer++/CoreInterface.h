@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "../Helper/ClipboardHelper.h"
 #include <boost/signals2.hpp>
 
 // Stops signal propagation after the first successful handler (i.e. the first handler that returns
@@ -30,7 +31,6 @@ struct FirstSuccessfulRequestCombiner
 	}
 };
 
-using TabsInitializedSignal = boost::signals2::signal<void()>;
 using MainMenuPreShowSignal = boost::signals2::signal<void(HMENU mainMenu)>;
 using MainMenuItemRightClickedSignal =
 	boost::signals2::signal<bool(HMENU menu, int index, const POINT &pt),
@@ -39,7 +39,7 @@ using MainMenuItemMiddleClickedSignal =
 	boost::signals2::signal<bool(const POINT &pt, bool isCtrlKeyDown, bool isShiftKeyDown),
 		FirstSuccessfulRequestCombiner<bool>>;
 using GetMenuItemHelperTextSignal =
-	boost::signals2::signal<std::optional<std::wstring>(HMENU menu, int id),
+	boost::signals2::signal<std::optional<std::wstring>(HMENU menu, UINT id),
 		FirstSuccessfulRequestCombiner<std::optional<std::wstring>>>;
 using ToolbarContextMenuSignal =
 	boost::signals2::signal<void(HMENU menu, HWND sourceWindow, const POINT &pt)>;
@@ -47,16 +47,13 @@ using ToolbarContextMenuSelectedSignal =
 	boost::signals2::signal<void(HWND sourceWindow, int menuItemId)>;
 using FocusChangedSignal = boost::signals2::signal<void()>;
 using DeviceChangeSignal = boost::signals2::signal<void(UINT eventType, LONG_PTR eventData)>;
-using ApplicationShuttingDownSignal = boost::signals2::signal<void()>;
 
 class CachedIcons;
 struct Config;
-class IconResourceLoader;
 __interface IDirectoryMonitor;
-class ShellBrowser;
+class ShellBrowserImpl;
 class StatusBar;
-class TabContainer;
-class TabRestorer;
+class TabContainerImpl;
 
 /* Basic interface between Explorerplusplus
 and some of the other components (such as the
@@ -68,18 +65,14 @@ public:
 
 	virtual const Config *GetConfig() const = 0;
 	virtual HINSTANCE GetResourceInstance() const = 0;
-	virtual HACCEL *GetAcceleratorTable() const = 0;
 
 	virtual HWND GetMainWindow() const = 0;
 
-	virtual HWND GetActiveListView() const = 0;
-	virtual ShellBrowser *GetActiveShellBrowser() const = 0;
+	virtual ShellBrowserImpl *GetActiveShellBrowserImpl() const = 0;
 
-	virtual TabContainer *GetTabContainer() const = 0;
-	virtual TabRestorer *GetTabRestorer() const = 0;
+	virtual TabContainerImpl *GetTabContainerImpl() const = 0;
 	virtual IDirectoryMonitor *GetDirectoryMonitor() const = 0;
 
-	virtual IconResourceLoader *GetIconResourceLoader() const = 0;
 	virtual CachedIcons *GetCachedIcons() = 0;
 
 	virtual HWND GetTreeView() const = 0;
@@ -89,6 +82,8 @@ public:
 	virtual std::wstring GetCurrentFolder() const = 0;
 
 	virtual void OpenFileItem(PCIDLIST_ABSOLUTE pidlItem, const TCHAR *szParameters) = 0;
+	virtual void OpenFileItem(const std::wstring &itemPath, const std::wstring &parameters) = 0;
+	virtual void OpenFileItem(PCIDLIST_ABSOLUTE pidl, const std::wstring &parameters) = 0;
 
 
 	virtual wil::unique_hmenu BuildViewsMenu() = 0;
@@ -99,25 +94,13 @@ public:
 	virtual BOOL CanRename() const = 0;
 	virtual BOOL CanDelete() const = 0;
 	virtual BOOL CanShowFileProperties() const = 0;
-	virtual BOOL CanPaste() const = 0;
+	virtual BOOL CanPaste(PasteType pasteType) const = 0;
 
 	virtual void ShowTabBar() = 0;
 	virtual void HideTabBar() = 0;
 
-	virtual void SetListViewInitialPosition(HWND hListView) = 0;
-
 	virtual void FocusChanged() = 0;
-	virtual void FocusActiveTab() = 0;
 
-	// Used to support the options dialog.
-	virtual void SaveAllSettings() = 0;
-	virtual BOOL GetSavePreferencesToXmlFile() const = 0;
-	virtual void SetSavePreferencesToXmlFile(BOOL savePreferencesToXmlFile) = 0;
-
-	virtual void RequestCloseApplication() = 0;
-
-	virtual boost::signals2::connection AddTabsInitializedObserver(
-		const TabsInitializedSignal::slot_type &observer) = 0;
 	virtual boost::signals2::connection AddMainMenuPreShowObserver(
 		const MainMenuPreShowSignal::slot_type &observer) = 0;
 	virtual boost::signals2::connection AddMainMenuItemMiddleClickedObserver(
@@ -134,6 +117,4 @@ public:
 		const FocusChangedSignal::slot_type &observer) = 0;
 	virtual boost::signals2::connection AddDeviceChangeObserver(
 		const DeviceChangeSignal::slot_type &observer) = 0;
-	virtual boost::signals2::connection AddApplicationShuttingDownObserver(
-		const ApplicationShuttingDownSignal::slot_type &observer) = 0;
 };

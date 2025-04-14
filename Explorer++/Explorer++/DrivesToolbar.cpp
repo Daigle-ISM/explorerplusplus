@@ -4,15 +4,16 @@
 
 #include "stdafx.h"
 #include "DrivesToolbar.h"
+#include "BrowserWindow.h"
 #include "Config.h"
 #include "CoreInterface.h"
 #include "DriveModel.h"
 #include "DrivesToolbarView.h"
 #include "MainResource.h"
-#include "Navigator.h"
+#include "NavigationHelper.h"
 #include "ResourceHelper.h"
-#include "ShellBrowser/ShellNavigator.h"
-#include "TabContainer.h"
+#include "ShellBrowser/NavigateParams.h"
+#include "TabContainerImpl.h"
 #include "../Helper/MenuHelper.h"
 #include "../Helper/ShellHelper.h"
 #include <ShlObj.h>
@@ -71,17 +72,18 @@ private:
 };
 
 DrivesToolbar *DrivesToolbar::Create(DrivesToolbarView *view,
-	std::unique_ptr<DriveModel> driveModel, CoreInterface *coreInterface, Navigator *navigator)
+	std::unique_ptr<DriveModel> driveModel, BrowserWindow *browserWindow,
+	CoreInterface *coreInterface)
 {
-	return new DrivesToolbar(view, std::move(driveModel), coreInterface, navigator);
+	return new DrivesToolbar(view, std::move(driveModel), browserWindow, coreInterface);
 }
 
 DrivesToolbar::DrivesToolbar(DrivesToolbarView *view, std::unique_ptr<DriveModel> driveModel,
-	CoreInterface *coreInterface, Navigator *navigator) :
+	BrowserWindow *browserWindow, CoreInterface *coreInterface) :
 	m_view(view),
 	m_driveModel(std::move(driveModel)),
-	m_coreInterface(coreInterface),
-	m_navigator(navigator)
+	m_browserWindow(browserWindow),
+	m_coreInterface(coreInterface)
 {
 	Initialize();
 }
@@ -158,14 +160,14 @@ void DrivesToolbar::OnButtonClicked(const std::wstring &drivePath, const MouseEv
 {
 	UNREFERENCED_PARAMETER(event);
 
-	m_navigator->OpenItem(drivePath,
-		m_navigator->DetermineOpenDisposition(false, event.ctrlKey, event.shiftKey));
+	m_browserWindow->OpenItem(drivePath,
+		DetermineOpenDisposition(false, event.ctrlKey, event.shiftKey));
 }
 
 void DrivesToolbar::OnButtonMiddleClicked(const std::wstring &drivePath, const MouseEvent &event)
 {
-	m_navigator->OpenItem(drivePath,
-		m_navigator->DetermineOpenDisposition(true, event.ctrlKey, event.shiftKey));
+	m_browserWindow->OpenItem(drivePath,
+		DetermineOpenDisposition(true, event.ctrlKey, event.shiftKey));
 }
 
 void DrivesToolbar::OnButtonRightClicked(const std::wstring &drivePath, const MouseEvent &event)
@@ -192,58 +194,72 @@ void DrivesToolbar::ShowContextMenu(const std::wstring &drivePath, const POINT &
 	[[maybe_unused]] BOOL res = ILRemoveLastID(pidl.get());
 	assert(res);
 
-	FileContextMenuManager contextMenuManager(m_view->GetHWND(), pidl.get(), { child.get() });
+	ShellContextMenu::Flags flags = ShellContextMenu::Flags::Standard;
 
-	contextMenuManager.ShowMenu(this, MIN_SHELL_MENU_ID, MAX_SHELL_MENU_ID, &ptScreen,
-		m_coreInterface->GetStatusBar(), NULL, FALSE, showExtended);
+	if (showExtended)
+	{
+		WI_SetFlag(flags, ShellContextMenu::Flags::ExtendedVerbs);
+	}
+
+	ShellContextMenu shellContextMenu(pidl.get(), { child.get() }, this,
+		m_coreInterface->GetStatusBar());
+	shellContextMenu.ShowMenu(m_view->GetHWND(), &ptScreen, nullptr, flags);
 }
 
-void DrivesToolbar::UpdateMenuEntries(PCIDLIST_ABSOLUTE pidlParent,
-	const std::vector<PITEMID_CHILD> &pidlItems, DWORD_PTR dwData, IContextMenu *contextMenu,
-	HMENU hMenu)
+void DrivesToolbar::UpdateMenuEntries(HMENU menu, PCIDLIST_ABSOLUTE pidlParent,
+	const std::vector<PidlChild> &pidlItems, IContextMenu *contextMenu)
 {
 	UNREFERENCED_PARAMETER(pidlParent);
 	UNREFERENCED_PARAMETER(pidlItems);
-	UNREFERENCED_PARAMETER(dwData);
 	UNREFERENCED_PARAMETER(contextMenu);
 
 	std::wstring openInNewTabText = ResourceHelper::LoadString(
 		m_coreInterface->GetResourceInstance(), IDS_GENERAL_OPEN_IN_NEW_TAB);
-	MenuHelper::AddStringItem(hMenu, MENU_ID_OPEN_IN_NEW_TAB, openInNewTabText, 1, TRUE);
+	MenuHelper::AddStringItem(menu, OPEN_IN_NEW_TAB_MENU_ITEM_ID, openInNewTabText, 1, TRUE);
 }
 
-BOOL DrivesToolbar::HandleShellMenuItem(PCIDLIST_ABSOLUTE pidlParent,
-	const std::vector<PITEMID_CHILD> &pidlItems, DWORD_PTR dwData, const TCHAR *szCmd)
+std::wstring DrivesToolbar::GetHelpTextForItem(UINT menuItemId)
 {
-	UNREFERENCED_PARAMETER(dwData);
+	switch (menuItemId)
+	{
+	case OPEN_IN_NEW_TAB_MENU_ITEM_ID:
+		return ResourceHelper::LoadString(m_coreInterface->GetResourceInstance(),
+			IDS_GENERAL_OPEN_IN_NEW_TAB_HELP_TEXT);
 
-	if (StrCmpI(szCmd, _T("open")) == 0)
+	default:
+		DCHECK(false);
+		return L"";
+	}
+}
+
+bool DrivesToolbar::HandleShellMenuItem(PCIDLIST_ABSOLUTE pidlParent,
+	const std::vector<PidlChild> &pidlItems, const std::wstring &verb)
+{
+	if (verb == L"open")
 	{
 		assert(pidlItems.size() == 1);
 
-		unique_pidl_absolute pidl(ILCombine(pidlParent, pidlItems[0]));
-		m_navigator->OpenItem(pidl.get());
-		return TRUE;
+		unique_pidl_absolute pidl(ILCombine(pidlParent, pidlItems[0].Raw()));
+		m_browserWindow->OpenItem(pidl.get());
+		return true;
 	}
 
-	return FALSE;
+	return false;
 }
 
 void DrivesToolbar::HandleCustomMenuItem(PCIDLIST_ABSOLUTE pidlParent,
-	const std::vector<PITEMID_CHILD> &pidlItems, int iCmd)
+	const std::vector<PidlChild> &pidlItems, UINT menuItemId)
 {
 	UNREFERENCED_PARAMETER(pidlItems);
 
-	switch (iCmd)
+	switch (menuItemId)
 	{
-	case MENU_ID_OPEN_IN_NEW_TAB:
+	case OPEN_IN_NEW_TAB_MENU_ITEM_ID:
 	{
 		assert(pidlItems.size() == 1);
 
-		unique_pidl_absolute pidl(ILCombine(pidlParent, pidlItems[0]));
-		auto navigateParams = NavigateParams::Normal(pidl.get());
-		m_coreInterface->GetTabContainer()->CreateNewTab(navigateParams,
-			TabSettings(_selected = m_coreInterface->GetConfig()->openTabsInForeground));
+		unique_pidl_absolute pidl(ILCombine(pidlParent, pidlItems[0].Raw()));
+		m_browserWindow->OpenItem(pidl.get(), OpenFolderDisposition::NewTabDefault);
 	}
 	break;
 	}

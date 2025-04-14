@@ -6,16 +6,17 @@
 
 #include "ShellBrowser/PreservedFolderState.h"
 #include "Tab.h"
-#include "../Helper/Macros.h"
+#include <boost/core/noncopyable.hpp>
 
-struct PreservedHistoryEntry;
+class PreservedHistoryEntry;
 
-struct PreservedTab
+struct PreservedTab : private boost::noncopyable
 {
 	PreservedTab(const Tab &tab, int index);
 	~PreservedTab();
 
 	int id;
+	int browserId;
 	int index;
 
 	std::vector<std::unique_ptr<PreservedHistoryEntry>> history;
@@ -28,7 +29,5 @@ struct PreservedTab
 	PreservedFolderState preservedFolderState;
 
 private:
-	DISALLOW_COPY_AND_ASSIGN(PreservedTab);
-
 	static std::vector<std::unique_ptr<PreservedHistoryEntry>> CopyHistoryEntries(const Tab &tab);
 };

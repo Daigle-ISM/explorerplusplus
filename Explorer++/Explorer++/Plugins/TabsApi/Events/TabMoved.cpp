@@ -4,21 +4,24 @@
 
 #include "stdafx.h"
 #include "Plugins/TabsApi/Events/TabMoved.h"
-#include "TabContainer.h"
+#include "Tab.h"
+#include "TabEvents.h"
 #include <sol/sol.hpp>
 
-Plugins::TabMoved::TabMoved(TabContainer *tabContainer) : m_tabContainer(tabContainer)
+namespace Plugins
+{
+
+TabMoved::TabMoved(TabEvents *tabEvents) : m_tabEvents(tabEvents)
 {
 }
 
-boost::signals2::connection Plugins::TabMoved::connectObserver(sol::protected_function observer,
+boost::signals2::connection TabMoved::connectObserver(sol::protected_function observer,
 	sol::this_state state)
 {
 	UNREFERENCED_PARAMETER(state);
 
-	return m_tabContainer->tabMovedSignal.AddObserver(
-		[observer](const Tab &tab, int fromIndex, int toIndex)
-		{
-			observer(tab.GetId(), fromIndex, toIndex);
-		});
+	return m_tabEvents->AddMovedObserver([observer](const Tab &tab, int fromIndex, int toIndex)
+		{ observer(tab.GetId(), fromIndex, toIndex); }, TabEventScope::Global());
+}
+
 }

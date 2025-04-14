@@ -9,13 +9,15 @@
 #include <cassert>
 
 // clang-format off
-const std::array<ViewMode, 8> VIEW_MODES = {
+const std::array<ViewMode, 10> VIEW_MODES = {
 	ViewMode::ExtraLargeIcons,
 	ViewMode::LargeIcons,
 	ViewMode::Icons,
 	ViewMode::SmallIcons,
 	ViewMode::List,
 	ViewMode::Details,
+	ViewMode::ExtraLargeThumbnails,
+	ViewMode::LargeThumbnails,
 	ViewMode::Thumbnails,
 	ViewMode::Tiles
 };
@@ -25,7 +27,7 @@ template <std::size_t N>
 ViewMode GetNextViewMode(const std::array<ViewMode, N> &viewModes, ViewMode viewMode)
 {
 	auto itr = std::find(viewModes.begin(), viewModes.end(), viewMode);
-	assert(itr != viewModes.end());
+	CHECK(itr != viewModes.end());
 
 	if (itr == viewModes.begin())
 	{
@@ -43,7 +45,7 @@ template <std::size_t N>
 ViewMode GetPreviousViewMode(const std::array<ViewMode, N> &viewModes, ViewMode viewMode)
 {
 	auto itr = std::find(viewModes.begin(), viewModes.end(), viewMode);
-	assert(itr != viewModes.end());
+	CHECK(itr != viewModes.end());
 
 	itr++;
 

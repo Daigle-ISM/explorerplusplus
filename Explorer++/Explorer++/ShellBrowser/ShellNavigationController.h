@@ -6,65 +6,68 @@
 
 #include "HistoryEntry.h"
 #include "NavigationController.h"
-#include "../Helper/Macros.h"
+#include <boost/core/noncopyable.hpp>
 #include <boost/signals2.hpp>
 #include <vector>
 
-class IconFetcherInterface;
 struct NavigateParams;
-struct PreservedHistoryEntry;
-class ShellNavigator;
+class NavigationEvents;
+class NavigationManager;
+class NavigationRequest;
+class PreservedHistoryEntry;
+class ShellBrowser;
 class TabNavigationInterface;
 
-enum class NavigationMode
+enum class NavigationTargetMode
 {
 	Normal,
 	ForceNewTab
 };
 
-class ShellNavigationController : public NavigationController<HistoryEntry, HRESULT>
+class ShellNavigationController :
+	public NavigationController<HistoryEntry>,
+	private boost::noncopyable
 {
 public:
-	ShellNavigationController(ShellNavigator *navigator, TabNavigationInterface *tabNavigation,
-		IconFetcherInterface *iconFetcher);
-	ShellNavigationController(ShellNavigator *navigator, TabNavigationInterface *tabNavigation,
-		IconFetcherInterface *iconFetcher,
+	// `initialPidl` here will be used to set up an initial entry. That then means that there will
+	// always be a current entry. That is, `GetCurrentEntry` will always return a non-null value.
+	ShellNavigationController(const ShellBrowser *shellBrowser,
+		NavigationManager *navigationManager, NavigationEvents *navigationEvents,
+		TabNavigationInterface *tabNavigation, const PidlAbsolute &initialPidl);
+
+	ShellNavigationController(const ShellBrowser *shellBrowser,
+		NavigationManager *navigationManager, NavigationEvents *navigationEvents,
+		TabNavigationInterface *tabNavigation,
 		const std::vector<std::unique_ptr<PreservedHistoryEntry>> &preservedEntries,
 		int currentEntry);
 
-	HRESULT GoToOffset(int offset) override;
-
 	[[nodiscard]] bool CanGoUp() const;
-	HRESULT GoUp();
+	void GoUp();
 
-	HRESULT Refresh();
+	void Refresh();
 
-	HRESULT Navigate(const std::wstring &path, bool addHistoryEntry = true);
-	HRESULT Navigate(NavigateParams &navigateParams);
+	void Navigate(const std::wstring &path);
+	void Navigate(NavigateParams &navigateParams);
 
-	void SetNavigationMode(NavigationMode navigationMode);
+	void SetNavigationTargetMode(NavigationTargetMode navigationTargetMode);
+	NavigationTargetMode GetNavigationTargetMode() const;
 
 	HistoryEntry *GetEntryById(int id);
 
 private:
-	DISALLOW_COPY_AND_ASSIGN(ShellNavigationController);
-
-	void Initialize();
+	void Initialize(const ShellBrowser *shellBrowser, NavigationEvents *navigationEvents);
 
 	static std::vector<std::unique_ptr<HistoryEntry>> CopyPreservedHistoryEntries(
 		const std::vector<std::unique_ptr<PreservedHistoryEntry>> &preservedEntries);
 
-	HRESULT Navigate(const HistoryEntry *entry) override;
-	HRESULT GetFailureValue() override;
+	void Navigate(const HistoryEntry *entry) override;
 
-	void OnNavigationCommitted(const NavigateParams &navigateParams);
+	void OnNavigationCommitted(const NavigationRequest *request);
 
-	ShellNavigator *m_navigator;
+	NavigationManager *const m_navigationManager;
 
 	TabNavigationInterface *m_tabNavigation;
-	NavigationMode m_navigationMode = NavigationMode::Normal;
-
-	IconFetcherInterface *m_iconFetcher;
+	NavigationTargetMode m_navigationTargetMode = NavigationTargetMode::Normal;
 
 	std::vector<boost::signals2::scoped_connection> m_connections;
 };

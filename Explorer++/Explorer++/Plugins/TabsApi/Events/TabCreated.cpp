@@ -5,31 +5,35 @@
 #include "stdafx.h"
 #include "Plugins/TabsApi/Events/TabCreated.h"
 #include "Plugins/TabsApi/TabsApi.h"
-#include "TabContainer.h"
+#include "TabEvents.h"
 #include <sol/sol.hpp>
 
-Plugins::TabCreated::TabCreated(TabContainer *tabContainer) : m_tabContainer(tabContainer)
+namespace Plugins
+{
+
+TabCreated::TabCreated(TabEvents *tabEvents) : m_tabEvents(tabEvents)
 {
 }
 
-boost::signals2::connection Plugins::TabCreated::connectObserver(sol::protected_function observer,
+boost::signals2::connection TabCreated::connectObserver(sol::protected_function observer,
 	sol::this_state state)
 {
 	UNREFERENCED_PARAMETER(state);
 
-	return m_tabContainer->tabCreatedSignal.AddObserver(
-		[this, observer](int tabId, BOOL switchToNewTab)
+	return m_tabEvents->AddCreatedObserver(
+		[this, observer](const Tab &tab, bool selected)
 		{
-			UNREFERENCED_PARAMETER(switchToNewTab);
+			UNREFERENCED_PARAMETER(selected);
 
-			onTabCreated(tabId, observer);
-		});
+			onTabCreated(tab, observer);
+		},
+		TabEventScope::Global());
 }
 
-void Plugins::TabCreated::onTabCreated(int tabId, sol::protected_function observer)
+void TabCreated::onTabCreated(const Tab &tab, sol::protected_function observer)
 {
-	const Tab &tabInternal = m_tabContainer->GetTab(tabId);
+	TabsApi::Tab apiTab(tab);
+	observer(apiTab);
+}
 
-	TabsApi::Tab tab(tabInternal);
-	observer(tab);
 }

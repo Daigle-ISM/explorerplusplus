@@ -10,10 +10,10 @@
 DriveWatcherImpl::DriveWatcherImpl(HWND topLevelWindow)
 {
 	// WM_DEVICECHANGE is only sent to top-level windows.
-	[[maybe_unused]] auto style = GetWindowLongPtr(topLevelWindow, GWL_STYLE);
-	assert(style && WI_IsFlagClear(style, WS_CHILD));
+	auto style = GetWindowLongPtr(topLevelWindow, GWL_STYLE);
+	DCHECK(style && WI_IsFlagClear(style, WS_CHILD));
 
-	m_windowSubclasses.push_back(std::make_unique<WindowSubclassWrapper>(topLevelWindow,
+	m_windowSubclasses.push_back(std::make_unique<WindowSubclass>(topLevelWindow,
 		std::bind_front(&DriveWatcherImpl::WndProc, this)));
 }
 

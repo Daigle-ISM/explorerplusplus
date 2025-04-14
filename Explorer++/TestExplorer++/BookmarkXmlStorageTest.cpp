@@ -4,10 +4,10 @@
 
 #include "pch.h"
 #include "Bookmarks/BookmarkXmlStorage.h"
-#include "BookmarkStorageHelper.h"
+#include "BookmarkStorageTestHelper.h"
 #include "Bookmarks/BookmarkTree.h"
-#include "ResourceHelper.h"
-#include "XmlStorageHelper.h"
+#include "ResourceTestHelper.h"
+#include "XmlStorageTestHelper.h"
 #include "../Helper/XMLSettings.h"
 #include <gtest/gtest.h>
 
@@ -20,11 +20,10 @@ protected:
 		bool compareGuids)
 	{
 		std::wstring xmlFilePath = GetResourcePath(filename);
-		auto xmlDocument = LoadXmlDocument(xmlFilePath);
-		ASSERT_TRUE(xmlDocument);
+		auto xmlDocumentData = LoadXmlDocument(xmlFilePath);
 
 		BookmarkTree loadedBookmarkTree;
-		BookmarkXmlStorage::Load(xmlDocument.get(), &loadedBookmarkTree);
+		BookmarkXmlStorage::Load(xmlDocumentData.rootNode.get(), &loadedBookmarkTree);
 
 		CompareBookmarkTrees(&loadedBookmarkTree, referenceBookmarkTree, compareGuids);
 	}
@@ -44,13 +43,12 @@ TEST_F(BookmarkXmlStorageTest, V2Save)
 	BuildV2LoadSaveReferenceTree(&referenceBookmarkTree);
 
 	auto xmlDocumentData = CreateXmlDocument();
-	ASSERT_TRUE(xmlDocumentData);
 
-	BookmarkXmlStorage::Save(xmlDocumentData->xmlDocument.get(), xmlDocumentData->root.get(),
-		&referenceBookmarkTree, 1);
+	BookmarkXmlStorage::Save(xmlDocumentData.xmlDocument.get(), xmlDocumentData.rootNode.get(),
+		&referenceBookmarkTree);
 
 	BookmarkTree loadedBookmarkTree;
-	BookmarkXmlStorage::Load(xmlDocumentData->xmlDocument.get(), &loadedBookmarkTree);
+	BookmarkXmlStorage::Load(xmlDocumentData.rootNode.get(), &loadedBookmarkTree);
 
 	CompareBookmarkTrees(&loadedBookmarkTree, &referenceBookmarkTree, true);
 }

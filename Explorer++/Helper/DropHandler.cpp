@@ -7,8 +7,7 @@
 #include "DataExchangeHelper.h"
 #include "GdiplusHelper.h"
 #include "Helper.h"
-#include "Logging.h"
-#include "Macros.h"
+#include <glog/logging.h>
 #include <wil/resource.h>
 #include <chrono>
 
@@ -26,12 +25,9 @@ DropHandler *DropHandler::CreateNew()
 	return new DropHandler();
 }
 
-HRESULT DropHandler::GetDropFormats(std::list<FORMATETC> &ftcList)
+std::vector<CLIPFORMAT> DropHandler::GetDropFormats()
 {
-	ftcList.push_back(m_ftcUnicodeText);
-	ftcList.push_back(m_ftcDIB);
-
-	return S_OK;
+	return { m_ftcUnicodeText.cfFormat, m_ftcPng.cfFormat, m_ftcDIB.cfFormat };
 }
 
 void DropHandler::CopyClipboardData(IDataObject *pDataObject, HWND hwndDrop,
@@ -86,19 +82,19 @@ void DropHandler::HandleLeftClickDrop(IDataObject *pDataObject, POINT *pt)
 
 	if (CheckDropFormatSupported(pDataObject, &m_ftcUnicodeText))
 	{
-		LOG(debug) << _T("Helper - Copying CF_UNICODETEXT data");
+		LOG(INFO) << "Helper - Copying CF_UNICODETEXT data";
 		hrCopy = CopyUnicodeTextData(pDataObject, pastedFileList);
 	}
 	else if (CheckDropFormatSupported(pDataObject, &m_ftcPng))
 	{
-		LOG(debug) << _T("Helper - Copying PNG data");
+		LOG(INFO) << "Helper - Copying PNG data";
 
 		bool res = CopyPngData(pDataObject, pastedFileList);
 		hrCopy = res ? S_OK : E_FAIL;
 	}
 	else if (CheckDropFormatSupported(pDataObject, &m_ftcDIB))
 	{
-		LOG(debug) << _T("Helper - Copying CF_DIB data");
+		LOG(INFO) << "Helper - Copying CF_DIB data";
 
 		bool res = CopyDIBData(pDataObject, pastedFileList);
 		hrCopy = res ? S_OK : E_FAIL;
@@ -169,7 +165,7 @@ HRESULT DropHandler::CopyUnicodeTextData(IDataObject *pDataObject,
 			TCHAR szFullFileName[MAX_PATH];
 
 			hr = CopyTextToFile(m_destDirectory.c_str(), pText, szFullFileName,
-				SIZEOF_ARRAY(szFullFileName));
+				std::size(szFullFileName));
 
 			if (hr == S_OK)
 			{
@@ -207,7 +203,7 @@ bool DropHandler::CopyPngData(IDataObject *dataObject, std::list<std::wstring> &
 	// dataSize is cast to a DWORD in the WriteFile() call below. It's not expected that an image
 	// would ever be larger than the size that can be represented in a DWORD (4GB), but if it is,
 	// the method should fail here, rather than blindly writing some of the data out.
-	if (dataSize == 0 || dataSize > (std::numeric_limits<DWORD>::max)())
+	if (dataSize == 0 || dataSize > std::numeric_limits<DWORD>::max())
 	{
 		return false;
 	}

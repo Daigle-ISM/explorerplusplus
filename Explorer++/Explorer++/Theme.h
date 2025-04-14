@@ -4,8 +4,10 @@
 
 #pragma once
 
-#include "BetterEnumsWrapper.h"
+#include "../Helper/BetterEnumsWrapper.h"
 #include <string>
+
+class ResourceLoader;
 
 // clang-format off
 BETTER_ENUM(Theme, int,
@@ -15,4 +17,4 @@ BETTER_ENUM(Theme, int,
 )
 // clang-format on
 
-std::wstring GetThemeText(Theme theme, HINSTANCE resourceInstance);
+std::wstring GetThemeText(Theme theme, const ResourceLoader *resourceLoader);

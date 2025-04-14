@@ -11,8 +11,8 @@
 
 class ColorRuleListView;
 class ColorRuleModel;
-class CoreInterface;
 class CustomizeColorsDialog;
+class IconResourceLoader;
 
 class CustomizeColorsDialogPersistentSettings : public DialogSettings
 {
@@ -22,7 +22,7 @@ public:
 private:
 	friend CustomizeColorsDialog;
 
-	static const TCHAR SETTINGS_KEY[];
+	static constexpr wchar_t SETTINGS_KEY[] = L"CustomizeColors";
 
 	CustomizeColorsDialogPersistentSettings();
 
@@ -34,8 +34,8 @@ private:
 class CustomizeColorsDialog : public ThemedDialog
 {
 public:
-	CustomizeColorsDialog(HINSTANCE resourceInstance, HWND parent, CoreInterface *coreInterface,
-		ColorRuleModel *model);
+	CustomizeColorsDialog(HINSTANCE resourceInstance, HWND parent, ThemeManager *themeManager,
+		ColorRuleModel *model, const IconResourceLoader *iconResourceLoader);
 	~CustomizeColorsDialog();
 
 protected:
@@ -46,6 +46,8 @@ protected:
 	virtual wil::unique_hicon GetDialogIcon(int iconWidth, int iconHeight) const override;
 
 private:
+	static constexpr COLORREF DEFAULT_INITIAL_COLOR = RGB(0, 94, 138);
+
 	enum class MovementDirection
 	{
 		Up,
@@ -65,8 +67,8 @@ private:
 
 	void UpdateControlStates();
 
-	CoreInterface *m_coreInterface;
 	ColorRuleModel *m_model;
+	const IconResourceLoader *const m_iconResourceLoader;
 	std::unique_ptr<ColorRuleListView> m_colorRuleListView;
 
 	CustomizeColorsDialogPersistentSettings *m_persistentSettings;

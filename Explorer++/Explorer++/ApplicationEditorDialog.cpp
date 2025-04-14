@@ -14,8 +14,9 @@ namespace Applications
 {
 
 ApplicationEditorDialog::ApplicationEditorDialog(HWND parent, HINSTANCE resourceInstance,
-	ApplicationModel *model, std::unique_ptr<EditDetails> editDetails) :
-	ThemedDialog(resourceInstance, IDD_EDITAPPLICATIONBUTTON, parent, DialogSizingType::None),
+	ThemeManager *themeManager, ApplicationModel *model, std::unique_ptr<EditDetails> editDetails) :
+	ThemedDialog(resourceInstance, IDD_EDITAPPLICATIONBUTTON, parent, DialogSizingType::None,
+		themeManager),
 	m_model(model),
 	m_editDetails(std::move(editDetails))
 {
@@ -104,7 +105,7 @@ void ApplicationEditorDialog::OnChooseFile()
 {
 	/* TODO: Text needs to be localized. */
 	const TCHAR *filter = _T("Programs (*.exe)\0*.exe\0All Files\0*.*\0\0");
-	TCHAR fullFileName[MAX_PATH] = EMPTY_STRING;
+	TCHAR fullFileName[MAX_PATH] = L"";
 
 	OPENFILENAME ofn;
 	ofn.lStructSize = sizeof(ofn);
@@ -114,7 +115,7 @@ void ApplicationEditorDialog::OnChooseFile()
 	ofn.nMaxCustFilter = 0;
 	ofn.nFilterIndex = 0;
 	ofn.lpstrFile = fullFileName;
-	ofn.nMaxFile = SIZEOF_ARRAY(fullFileName);
+	ofn.nMaxFile = std::size(fullFileName);
 	ofn.lpstrFileTitle = nullptr;
 	ofn.nMaxFileTitle = 0;
 	ofn.lpstrInitialDir = nullptr;

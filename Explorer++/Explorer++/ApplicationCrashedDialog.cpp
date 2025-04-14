@@ -4,7 +4,7 @@
 
 #include "stdafx.h"
 #include "ApplicationCrashedDialog.h"
-#include "Explorer++_internal.h"
+#include "App.h"
 #include "../Helper/ShellHelper.h"
 #include <format>
 
@@ -38,7 +38,7 @@ void ApplicationCrashedDialog::Show()
 	dialogConfig.hInstance = GetModuleHandle(nullptr);
 	dialogConfig.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_SIZE_TO_CONTENT;
 	dialogConfig.dwCommonButtons = TDCBF_CLOSE_BUTTON;
-	dialogConfig.pszWindowTitle = NExplorerplusplus::APP_NAME;
+	dialogConfig.pszWindowTitle = App::APP_NAME;
 	dialogConfig.pszMainIcon = TD_ERROR_ICON;
 	dialogConfig.pszMainInstruction = L"Explorer++ has encountered an error.";
 	dialogConfig.pszContent = message.c_str();
@@ -74,17 +74,17 @@ HRESULT ApplicationCrashedDialog::Callback(HWND hwnd, UINT msg, WPARAM wParam, L
 		switch (wParam)
 		{
 		case REPORT_ISSUE_BUTTON_ID:
-			ShellExecute(nullptr, L"open", REPORT_ISSUE_URL, nullptr, nullptr, SW_SHOW);
+			ShellExecute(nullptr, L"open", REPORT_ISSUE_URL, nullptr, nullptr, SW_SHOWNORMAL);
 			return S_FALSE;
 
 		case SHOW_CRASH_DUMP_BUTTON_ID:
 		{
-			unique_pidl_absolute pidl;
-			HRESULT hr = CreateSimplePidl(m_crashDumpFileName.value(), wil::out_param(pidl));
+			PidlAbsolute pidl;
+			HRESULT hr = CreateSimplePidl(m_crashDumpFileName.value(), pidl);
 
 			if (SUCCEEDED(hr))
 			{
-				SHOpenFolderAndSelectItems(pidl.get(), 0, nullptr, 0);
+				SHOpenFolderAndSelectItems(pidl.Raw(), 0, nullptr, 0);
 			}
 		}
 			return S_FALSE;

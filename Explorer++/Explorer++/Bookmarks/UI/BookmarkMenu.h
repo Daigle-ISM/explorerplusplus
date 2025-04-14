@@ -7,13 +7,15 @@
 #include "Bookmarks/UI/BookmarkMenuBuilder.h"
 #include "Bookmarks/UI/BookmarkMenuController.h"
 #include "../Helper/WinRTBaseWrapper.h"
-#include "../Helper/WindowSubclassWrapper.h"
+#include "../Helper/WindowSubclass.h"
 
 class BookmarkItem;
 class BookmarkTree;
+class BrowserWindow;
 class CoreInterface;
 class IconFetcher;
-class Navigator;
+class IconResourceLoader;
+class ThemeManager;
 
 // Although it's not necessary, this class is effectively designed to be held
 // for the lifetime of its parent class. Doing so is more efficient, as the
@@ -23,15 +25,16 @@ class BookmarkMenu
 {
 public:
 	BookmarkMenu(BookmarkTree *bookmarkTree, HINSTANCE resourceInstance,
-		CoreInterface *coreInterface, Navigator *navigator, IconFetcher *iconFetcher,
-		HWND parentWindow);
+		BrowserWindow *browserWindow, CoreInterface *coreInterface,
+		const IconResourceLoader *iconResourceLoader, IconFetcher *iconFetcher, HWND parentWindow,
+		ThemeManager *themeManager);
 
 	BOOL ShowMenu(BookmarkItem *bookmarkItem, const POINT &pt,
 		BookmarkMenuBuilder::IncludePredicate includePredicate = nullptr);
 
 private:
-	static const int MIN_ID = 1;
-	static const int MAX_ID = 1000;
+	static const UINT MIN_ID = 1;
+	static const UINT MAX_ID = 1000;
 
 	LRESULT ParentWindowSubclass(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -41,17 +44,16 @@ private:
 	LRESULT OnMenuDrag(HMENU menu, int itemPosition);
 	LRESULT OnMenuGetObject(MENUGETOBJECTINFO *objectInfo);
 
-	void OnMenuItemSelected(int menuItemId, BookmarkMenuBuilder::ItemIdMap &menuItemIdMappings);
+	void OnMenuItemSelected(UINT menuItemId, BookmarkMenuBuilder::ItemIdMap &menuItemIdMappings);
 
+	BookmarkTree *m_bookmarkTree = nullptr;
 	HWND m_parentWindow;
 	BookmarkMenuBuilder m_menuBuilder;
 	BookmarkMenuController m_controller;
 
-	BookmarkTree *m_bookmarkTree = nullptr;
-
-	bool m_showingMenu = false;
+	HMENU m_activeMenu = nullptr;
 	BookmarkMenuBuilder::MenuInfo *m_menuInfo = nullptr;
 	winrt::com_ptr<IDropTarget> m_dropTarget;
 
-	std::vector<std::unique_ptr<WindowSubclassWrapper>> m_windowSubclasses;
+	std::vector<std::unique_ptr<WindowSubclass>> m_windowSubclasses;
 };

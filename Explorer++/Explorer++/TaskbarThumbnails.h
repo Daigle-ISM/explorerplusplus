@@ -5,25 +5,26 @@
 #pragma once
 
 #include "Tab.h"
-#include "../Helper/Macros.h"
+#include <boost/core/noncopyable.hpp>
 #include <boost/signals2.hpp>
 #include <wil/com.h>
 #include <wil/resource.h>
+#include <memory>
 
-struct Config;
-class CoreInterface;
-struct NavigateParams;
-class TabContainer;
+class App;
+class BrowserWindow;
+class NavigationRequest;
+class ShellBrowser;
+class TabContainerImpl;
+class WindowSubclass;
 
-class TaskbarThumbnails
+class TaskbarThumbnails : private boost::noncopyable
 {
 public:
-	static TaskbarThumbnails *Create(CoreInterface *coreInterface, TabContainer *tabContainer,
-		HINSTANCE resourceInstance, std::shared_ptr<Config> config);
+	TaskbarThumbnails(App *app, BrowserWindow *browser, TabContainerImpl *tabContainerImpl);
+	~TaskbarThumbnails();
 
 private:
-	DISALLOW_COPY_AND_ASSIGN(TaskbarThumbnails);
-
 	struct TabProxyInfo
 	{
 		ATOM atomClass;
@@ -32,13 +33,7 @@ private:
 		wil::unique_hicon icon;
 	};
 
-	TaskbarThumbnails(CoreInterface *coreInterface, TabContainer *tabContainer,
-		HINSTANCE resourceInstance, std::shared_ptr<Config> config);
-	~TaskbarThumbnails() = default;
-
-	static LRESULT CALLBACK MainWndProcStub(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
-		UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
-	LRESULT CALLBACK MainWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+	LRESULT MainWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 	static LRESULT CALLBACK TabProxyWndProcStub(HWND hwnd, UINT Msg, WPARAM wParam, LPARAM lParam);
 	LRESULT CALLBACK TabProxyWndProc(HWND hwnd, UINT Msg, WPARAM wParam, LPARAM lParam, int iTabId);
@@ -48,25 +43,25 @@ private:
 	void SetUpObservers();
 	void SetupJumplistTasks();
 	ATOM RegisterTabProxyClass(const TCHAR *szClassName);
-	void CreateTabProxy(int iTabId, BOOL bSwitchToNewTab);
+	void CreateTabProxy(const Tab &tab, bool selected);
 	void RegisterTab(HWND hTabProxy, const TCHAR *szDisplayName, BOOL bTabActive);
-	void RemoveTabProxy(int iTabId);
+	void RemoveTabProxy(const Tab &tab);
 	void DestroyTabProxy(TabProxyInfo &tabProxy);
 	void OnDwmSendIconicThumbnail(HWND tabProxy, const Tab &tab, int maxWidth, int maxHeight);
 	wil::unique_hbitmap CaptureTabScreenshot(const Tab &tab);
 	wil::unique_hbitmap GetTabLivePreviewBitmap(const Tab &tab);
 	void OnTabSelectionChanged(const Tab &tab);
-	void OnNavigationCommitted(const Tab &tab, const NavigateParams &navigateParams);
-	void OnNavigationCompleted(const Tab &tab, const NavigateParams &navigateParams);
+	void OnNavigationCommitted(const NavigationRequest *request);
+	void OnDirectoryPropertiesChanged(const ShellBrowser *shellBrowser);
 	void SetTabProxyIcon(const Tab &tab);
 	void InvalidateTaskbarThumbnailBitmap(const Tab &tab);
 	void UpdateTaskbarThumbnailTitle(const Tab &tab);
-	void OnApplicationShuttingDown();
 
-	CoreInterface *m_coreInterface;
-	TabContainer *m_tabContainer;
-	HINSTANCE m_instance;
+	App *const m_app;
+	BrowserWindow *const m_browser;
+	TabContainerImpl *const m_tabContainerImpl;
 	std::vector<boost::signals2::scoped_connection> m_connections;
+	std::unique_ptr<WindowSubclass> m_mainWindowSubclass;
 
 	wil::com_ptr_nothrow<ITaskbarList4> m_taskbarList;
 	std::list<TabProxyInfo> m_TabProxyList;

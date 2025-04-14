@@ -8,7 +8,7 @@
 #include "IconResourceLoader.h"
 #include "MainResource.h"
 #include "ResourceHelper.h"
-#include "ShellBrowser/ShellBrowser.h"
+#include "ShellBrowser/ShellBrowserImpl.h"
 #include "../Helper/RegistrySettings.h"
 #include "../Helper/WindowHelper.h"
 #include "../Helper/XMLSettings.h"
@@ -18,11 +18,12 @@ const TCHAR FilterDialogPersistentSettings::SETTINGS_KEY[] = _T("Filter");
 
 const TCHAR FilterDialogPersistentSettings::SETTING_FILTER_LIST[] = _T("Filter");
 
-FilterDialog::FilterDialog(HINSTANCE resourceInstance, HWND hParent, CoreInterface *coreInterface) :
-	ThemedDialog(resourceInstance, IDD_FILTER, hParent, DialogSizingType::Horizontal)
+FilterDialog::FilterDialog(HINSTANCE resourceInstance, HWND hParent, ThemeManager *themeManager,
+	CoreInterface *coreInterface, const IconResourceLoader *iconResourceLoader) :
+	ThemedDialog(resourceInstance, IDD_FILTER, hParent, DialogSizingType::Horizontal, themeManager),
+	m_coreInterface(coreInterface),
+	m_iconResourceLoader(iconResourceLoader)
 {
-	m_coreInterface = coreInterface;
-
 	m_persistentSettings = &FilterDialogPersistentSettings::GetInstance();
 }
 
@@ -38,13 +39,13 @@ INT_PTR FilterDialog::OnInitDialog()
 			reinterpret_cast<LPARAM>(strFilter.c_str()));
 	}
 
-	std::wstring filter = m_coreInterface->GetActiveShellBrowser()->GetFilterText();
+	std::wstring filter = m_coreInterface->GetActiveShellBrowserImpl()->GetFilterText();
 
 	ComboBox_SelectString(hComboBox, -1, filter.c_str());
 
 	SendMessage(hComboBox, CB_SETEDITSEL, 0, MAKELPARAM(0, -1));
 
-	if (m_coreInterface->GetActiveShellBrowser()->GetFilterCaseSensitive())
+	if (m_coreInterface->GetActiveShellBrowserImpl()->GetFilterCaseSensitive())
 	{
 		CheckDlgButton(m_hDlg, IDC_FILTERS_CASESENSITIVE, BST_CHECKED);
 	}
@@ -56,8 +57,7 @@ INT_PTR FilterDialog::OnInitDialog()
 
 wil::unique_hicon FilterDialog::GetDialogIcon(int iconWidth, int iconHeight) const
 {
-	return m_coreInterface->GetIconResourceLoader()->LoadIconFromPNGAndScale(Icon::Filter,
-		iconWidth, iconHeight);
+	return m_iconResourceLoader->LoadIconFromPNGAndScale(Icon::Filter, iconWidth, iconHeight);
 }
 
 std::vector<ResizableDialogControl> FilterDialog::GetResizableControls()
@@ -124,14 +124,14 @@ void FilterDialog::OnOk()
 		m_persistentSettings->m_FilterList.push_front(filter);
 	}
 
-	m_coreInterface->GetActiveShellBrowser()->SetFilterCaseSensitive(
+	m_coreInterface->GetActiveShellBrowserImpl()->SetFilterCaseSensitive(
 		IsDlgButtonChecked(m_hDlg, IDC_FILTERS_CASESENSITIVE) == BST_CHECKED);
 
-	m_coreInterface->GetActiveShellBrowser()->SetFilterText(filter);
+	m_coreInterface->GetActiveShellBrowserImpl()->SetFilterText(filter);
 
-	if (!m_coreInterface->GetActiveShellBrowser()->IsFilterApplied())
+	if (!m_coreInterface->GetActiveShellBrowserImpl()->IsFilterApplied())
 	{
-		m_coreInterface->GetActiveShellBrowser()->SetFilterApplied(TRUE);
+		m_coreInterface->GetActiveShellBrowserImpl()->SetFilterApplied(TRUE);
 	}
 
 	EndDialog(m_hDlg, 1);
@@ -172,7 +172,7 @@ void FilterDialogPersistentSettings::LoadExtraRegistrySettings(HKEY hKey)
 void FilterDialogPersistentSettings::SaveExtraXMLSettings(IXMLDOMDocument *pXMLDom,
 	IXMLDOMElement *pParentNode)
 {
-	NXMLSettings::AddStringListToNode(pXMLDom, pParentNode, SETTING_FILTER_LIST, m_FilterList);
+	XMLSettings::AddStringListToNode(pXMLDom, pParentNode, SETTING_FILTER_LIST, m_FilterList);
 }
 
 void FilterDialogPersistentSettings::LoadExtraXMLSettings(BSTR bstrName, BSTR bstrValue)

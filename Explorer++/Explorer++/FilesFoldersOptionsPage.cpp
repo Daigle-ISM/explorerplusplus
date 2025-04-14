@@ -8,13 +8,14 @@
 #include "CoreInterface.h"
 #include "MainResource.h"
 #include "ResourceHelper.h"
-#include "ShellBrowser/ShellBrowser.h"
+#include "ShellBrowser/ShellBrowserImpl.h"
 #include "ShellBrowser/ShellNavigationController.h"
-#include "TabContainer.h"
+#include "TabContainerImpl.h"
 #include "../Helper/Controls.h"
 #include "../Helper/ListViewHelper.h"
 #include "../Helper/ResizableDialogHelper.h"
 #include <boost/range/adaptor/map.hpp>
+#include <glog/logging.h>
 
 std::wstring GetSizeDisplayFormatText(SizeDisplayFormat sizeDisplayFormat,
 	HINSTANCE resourceInstance);
@@ -132,7 +133,7 @@ void FilesFoldersOptionsPage::InitializeControls()
 		CheckDlgButton(GetDialog(), IDC_OPTIONS_CHECK_SHOWINFOTIPS, BST_CHECKED);
 	}
 
-	if (m_config->infoTipType == InfoTipType::System)
+	if (m_config->infoTipType == +InfoTipType::System)
 	{
 		CheckDlgButton(GetDialog(), IDC_OPTIONS_RADIO_SYSTEMINFOTIPS, BST_CHECKED);
 	}
@@ -157,9 +158,13 @@ void FilesFoldersOptionsPage::InitializeControls()
 	HWND fileSizesComboBox = GetDlgItem(GetDialog(), IDC_COMBO_FILESIZES);
 	std::vector<ComboBoxItem> fileSizeItems;
 
-	for (auto size : { SizeDisplayFormat::Bytes, SizeDisplayFormat::KB, SizeDisplayFormat::MB,
-			 SizeDisplayFormat::GB, SizeDisplayFormat::TB, SizeDisplayFormat::PB })
+	for (auto size : SizeDisplayFormat::_values())
 	{
+		if (size == +SizeDisplayFormat::None)
+		{
+			continue;
+		}
+
 		fileSizeItems.emplace_back(static_cast<int>(size),
 			GetSizeDisplayFormatText(size, m_resourceInstance));
 	}
@@ -268,7 +273,6 @@ std::wstring GetSizeDisplayFormatText(SizeDisplayFormat sizeDisplayFormat,
 
 	switch (sizeDisplayFormat)
 	{
-		break;
 	case SizeDisplayFormat::Bytes:
 		stringId = IDS_OPTIONS_DIALOG_FILE_SIZE_BYTES;
 		break;
@@ -297,7 +301,8 @@ std::wstring GetSizeDisplayFormatText(SizeDisplayFormat sizeDisplayFormat,
 	// never be a string lookup for that item.
 	case SizeDisplayFormat::None:
 	default:
-		throw std::runtime_error("SizeDisplayFormat value not found or invalid");
+		LOG(FATAL) << "SizeDisplayFormat value not found or invalid";
+		__assume(0);
 	}
 
 	return ResourceHelper::LoadString(resourceInstance, stringId);
@@ -367,11 +372,12 @@ void FilesFoldersOptionsPage::SaveSettings()
 	hCBSize = GetDlgItem(GetDialog(), IDC_COMBO_FILESIZES);
 
 	iSel = (int) SendMessage(hCBSize, CB_GETCURSEL, 0, 0);
-	m_config->globalFolderSettings.sizeDisplayFormat =
-		(SizeDisplayFormat) SendMessage(hCBSize, CB_GETITEMDATA, iSel, 0);
+	m_config->globalFolderSettings.sizeDisplayFormat = SizeDisplayFormat::_from_integral(
+		static_cast<SizeDisplayFormat::_integral>(SendMessage(hCBSize, CB_GETITEMDATA, iSel, 0)));
 
-	for (auto &tab : m_coreInterface->GetTabContainer()->GetAllTabs() | boost::adaptors::map_values)
+	for (auto &tab :
+		m_coreInterface->GetTabContainerImpl()->GetAllTabs() | boost::adaptors::map_values)
 	{
-		tab->GetShellBrowser()->GetNavigationController()->Refresh();
+		tab->GetShellBrowserImpl()->GetNavigationController()->Refresh();
 	}
 }

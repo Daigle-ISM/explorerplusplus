@@ -4,10 +4,11 @@
 
 #pragma once
 
+#include <glog/logging.h>
 #include <memory>
 #include <vector>
 
-template <typename HistoryEntryType, typename BrowseFolderReturnType>
+template <typename HistoryEntryType>
 class NavigationController
 {
 public:
@@ -17,10 +18,18 @@ public:
 
 	NavigationController(std::vector<std::unique_ptr<HistoryEntryType>> &&entries,
 		int currentEntry) :
-		m_entries(std::move(entries)),
-		m_currentEntry(currentEntry)
+		m_entries(std::move(entries))
 	{
+		// This constructor should only be called with at least one entry. Passing in an empty set
+		// of entries isn't valid. It's necessary to validate this before initializing
+		// `m_currentEntry` below, since the `std::clamp` call won't be valid if the set of entries
+		// is empty (lo will be greater than hi, which will cause undefined behavior).
+		CHECK(!m_entries.empty());
+
+		m_currentEntry = std::clamp(currentEntry, 0, static_cast<int>(m_entries.size() - 1));
 	}
+
+	virtual ~NavigationController() = default;
 
 	int GetNumHistoryEntries() const
 	{
@@ -59,7 +68,7 @@ public:
 		return m_entries[index].get();
 	}
 
-	std::optional<int> GetIndexOfEntry(HistoryEntryType *entry) const
+	std::optional<int> GetIndexOfEntry(const HistoryEntryType *entry) const
 	{
 		auto itr = std::find_if(m_entries.begin(), m_entries.end(),
 			[entry](auto &currentEntry) { return currentEntry.get() == entry; });
@@ -126,39 +135,30 @@ public:
 		return history;
 	}
 
-	BrowseFolderReturnType GoBack()
+	void GoBack()
 	{
-		return GoToOffset(-1);
+		GoToOffset(-1);
 	}
 
-	BrowseFolderReturnType GoForward()
+	void GoForward()
 	{
-		return GoToOffset(1);
+		GoToOffset(1);
 	}
 
-	virtual BrowseFolderReturnType GoToOffset(int offset)
+	void GoToOffset(int offset)
 	{
 		auto entry = GetEntry(offset);
 
 		if (!entry)
 		{
-			return GetFailureValue();
+			return;
 		}
 
-		auto res = Navigate(entry);
-
-		if (res != GetFailureValue())
-		{
-			int index = m_currentEntry + offset;
-			m_currentEntry = index;
-		}
-
-		return res;
+		Navigate(entry);
 	}
 
 protected:
-	virtual BrowseFolderReturnType Navigate(const HistoryEntryType *entry) = 0;
-	virtual BrowseFolderReturnType GetFailureValue() = 0;
+	virtual void Navigate(const HistoryEntryType *entry) = 0;
 
 	int AddEntry(std::unique_ptr<HistoryEntryType> entry)
 	{
@@ -171,12 +171,24 @@ protected:
 		return m_currentEntry;
 	}
 
+	int ReplaceCurrentEntry(std::unique_ptr<HistoryEntryType> entry)
+	{
+		if (m_currentEntry == -1)
+		{
+			// Shouldn't be attempting to replace the current entry when there is no current entry.
+			DCHECK(false);
+
+			return AddEntry(std::move(entry));
+		}
+
+		m_entries[m_currentEntry] = std::move(entry);
+
+		return m_currentEntry;
+	}
+
 	void SetCurrentIndex(int index)
 	{
-		if (index < 0 || index >= GetNumHistoryEntries())
-		{
-			throw std::runtime_error("Incorrect history index specified");
-		}
+		CHECK(index >= 0 && index < GetNumHistoryEntries());
 
 		m_currentEntry = index;
 	}

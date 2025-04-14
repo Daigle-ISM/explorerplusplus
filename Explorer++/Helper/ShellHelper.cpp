@@ -5,17 +5,37 @@
 #include "stdafx.h"
 #include "ShellHelper.h"
 #include "Helper.h"
-#include "Macros.h"
 #include "ProcessHelper.h"
 #include "RegistrySettings.h"
 #include "StringHelper.h"
+#include "WinRTBaseWrapper.h"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string/trim.hpp>
 #include <boost/container_hash/hash.hpp>
+#include <glog/logging.h>
 #include <wil/com.h>
 #include <propkey.h>
 #include <wininet.h>
+
+namespace
+{
+
+// This will be returned in cases where retrieving a display name fails. I'm not aware of any
+// situations where that can legitimately occur, but if it does ever happen, something needs to be
+// displayed.
+constexpr wchar_t DISPLAY_NAME_FALLBACK[] = L"(Unknown)";
+
+}
+
+enum class LinkTargetRetrievalType
+{
+	DontResolve,
+	Resolve
+};
+
+BOOL ExecuteFileAction(HWND hwnd, const void *item, bool isPidl, const std::wstring &verb,
+	const std::wstring &parameters, const std::wstring &startDirectory);
 
 std::optional<std::wstring> TransformUserEnteredPathToAbsolutePath(
 	const std::wstring &userEnteredPath, const std::wstring &currentDirectory,
@@ -26,6 +46,9 @@ bool AddJumpListTasksInternal(IObjectCollection *objectCollection,
 	const std::list<JumpListTaskInformation> &taskList);
 HRESULT AddJumpListTaskInternal(IObjectCollection *objectCollection, const TCHAR *name,
 	const TCHAR *path, const TCHAR *arguments, const TCHAR *iconPath, int iconIndex);
+
+HRESULT MaybeGetLinkTarget(HWND hwnd, PCIDLIST_ABSOLUTE pidl, LinkTargetRetrievalType retrievalType,
+	unique_pidl_absolute &targetPidl);
 
 HRESULT GetDisplayName(const std::wstring &parsingPath, DWORD flags, std::wstring &output)
 {
@@ -38,6 +61,21 @@ HRESULT GetDisplayName(const std::wstring &parsingPath, DWORD flags, std::wstrin
 	}
 
 	return hr;
+}
+
+std::wstring GetDisplayNameWithFallback(PCIDLIST_ABSOLUTE pidl, DWORD flags)
+{
+	std::wstring name;
+	HRESULT hr = GetDisplayName(pidl, flags, name);
+
+	if (FAILED(hr))
+	{
+		DCHECK(false);
+
+		return DISPLAY_NAME_FALLBACK;
+	}
+
+	return name;
 }
 
 HRESULT GetDisplayName(PCIDLIST_ABSOLUTE pidl, DWORD flags, std::wstring &output)
@@ -130,47 +168,61 @@ HRESULT GetItemAttributes(PCIDLIST_ABSOLUTE pidl, SFGAOF *pItemAttributes)
 	return hr;
 }
 
-BOOL ExecuteFileAction(HWND hwnd, const TCHAR *szVerb, const TCHAR *szParameters,
-	const TCHAR *szStartDirectory, LPCITEMIDLIST pidl)
+BOOL LaunchCurrentProcess(HWND hwnd, const std::wstring &parameters,
+	LaunchCurrentProcessFlags flags)
 {
-	SHELLEXECUTEINFO sei;
+	TCHAR currentProcessPath[MAX_PATH];
+	GetProcessImageName(GetCurrentProcessId(), currentProcessPath, std::size(currentProcessPath));
 
-	sei.cbSize = sizeof(SHELLEXECUTEINFO);
-	sei.fMask = SEE_MASK_INVOKEIDLIST;
-	sei.lpVerb = szVerb;
-	sei.lpIDList = (LPVOID) pidl;
-	sei.hwnd = hwnd;
-	sei.nShow = SW_SHOW;
-	sei.lpParameters = szParameters;
-	sei.lpDirectory = szStartDirectory;
-	sei.lpFile = nullptr;
-	sei.hInstApp = nullptr;
+	std::wstring verb;
 
-	return ShellExecuteEx(&sei);
+	if (WI_IsFlagSet(flags, LaunchCurrentProcessFlags::Elevated))
+	{
+		verb = L"runas";
+	}
+
+	return ExecuteFileAction(hwnd, currentProcessPath, verb, parameters, L"");
 }
 
-BOOL ExecuteAndShowCurrentProcess(HWND hwnd, const TCHAR *szParameters)
+BOOL ExecuteFileAction(HWND hwnd, const std::wstring &itemPath, const std::wstring &verb,
+	const std::wstring &parameters, const std::wstring &startDirectory)
 {
-	TCHAR szCurrentProcess[MAX_PATH];
-	GetProcessImageName(GetCurrentProcessId(), szCurrentProcess, SIZEOF_ARRAY(szCurrentProcess));
-
-	return ExecuteAndShowProcess(hwnd, szCurrentProcess, szParameters);
+	return ExecuteFileAction(hwnd, itemPath.c_str(), false, verb, parameters, startDirectory);
 }
 
-BOOL ExecuteAndShowProcess(HWND hwnd, const TCHAR *szProcess, const TCHAR *szParameters)
+BOOL ExecuteFileAction(HWND hwnd, PCIDLIST_ABSOLUTE pidl, const std::wstring &verb,
+	const std::wstring &parameters, const std::wstring &startDirectory)
 {
-	SHELLEXECUTEINFO sei;
+	return ExecuteFileAction(hwnd, pidl, true, verb, parameters, startDirectory);
+}
 
-	sei.cbSize = sizeof(sei);
-	sei.fMask = SEE_MASK_DEFAULT;
-	sei.lpVerb = _T("open");
-	sei.lpFile = szProcess;
-	sei.lpParameters = szParameters;
-	sei.lpDirectory = nullptr;
-	sei.hwnd = hwnd;
-	sei.nShow = SW_SHOW;
+BOOL ExecuteFileAction(HWND hwnd, const void *item, bool isPidl, const std::wstring &verb,
+	const std::wstring &parameters, const std::wstring &startDirectory)
+{
+	// Note that the SW_SHOWNORMAL display flag is used below. It's important to use that flag,
+	// specifically, rather than something like SW_SHOW. That's because SW_SHOWNORMAL will ensure
+	// that when a shortcut item is opened, the window display state set on the shortcut (i.e.
+	// normal, minimized, maximized) will be correctly obeyed.
+	SHELLEXECUTEINFO executeInfo = {};
+	executeInfo.cbSize = sizeof(SHELLEXECUTEINFO);
+	executeInfo.fMask = SEE_MASK_DEFAULT;
+	executeInfo.lpVerb = verb.empty() ? nullptr : verb.c_str();
+	executeInfo.hwnd = hwnd;
+	executeInfo.nShow = SW_SHOWNORMAL;
+	executeInfo.lpParameters = parameters.empty() ? nullptr : parameters.c_str();
+	executeInfo.lpDirectory = startDirectory.empty() ? nullptr : startDirectory.c_str();
 
-	return ShellExecuteEx(&sei);
+	if (isPidl)
+	{
+		executeInfo.fMask |= SEE_MASK_INVOKEIDLIST;
+		executeInfo.lpIDList = const_cast<void *>(item);
+	}
+	else
+	{
+		executeInfo.lpFile = static_cast<LPCWSTR>(item);
+	}
+
+	return ShellExecuteEx(&executeInfo);
 }
 
 HRESULT GetVirtualParentPath(PCIDLIST_ABSOLUTE pidlDirectory, PIDLIST_ABSOLUTE *pidlParent)
@@ -361,62 +413,25 @@ HRESULT DecodeFriendlyPath(const std::wstring &friendlyPath, std::wstring &parsi
 	return E_FAIL;
 }
 
-int GetDefaultFolderIconIndex()
+HRESULT GetDefaultFolderIconIndex(int &outputImageIndex)
 {
-	return GetDefaultIcon(DefaultIconType::Folder);
+	return GetDefaultIcon(SIID_FOLDER, outputImageIndex);
 }
 
-int GetDefaultFileIconIndex()
+HRESULT GetDefaultFileIconIndex(int &outputImageIndex)
 {
-	return GetDefaultIcon(DefaultIconType::File);
+	return GetDefaultIcon(SIID_DOCNOASSOC, outputImageIndex);
 }
 
-int GetDefaultIcon(DefaultIconType defaultIconType)
+HRESULT GetDefaultIcon(SHSTOCKICONID iconId, int &outputImageIndex)
 {
-	SHFILEINFO shfi;
-	DWORD dwFileAttributes;
+	SHSTOCKICONINFO info = {};
+	info.cbSize = sizeof(info);
+	RETURN_IF_FAILED(SHGetStockIconInfo(iconId, SHGSI_SYSICONINDEX, &info));
 
-	switch (defaultIconType)
-	{
-	case DefaultIconType::Folder:
-		dwFileAttributes = FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_NORMAL;
-		break;
+	outputImageIndex = info.iSysImageIndex;
 
-	case DefaultIconType::File:
-	default:
-		dwFileAttributes = FILE_ATTRIBUTE_NORMAL;
-		break;
-	}
-
-	/* Under unicode, the filename argument cannot be NULL,
-	as it is not a valid unicode character. */
-	SHGetFileInfo(_T("dummy"), dwFileAttributes, &shfi, sizeof(SHFILEINFO),
-		SHGFI_SYSICONINDEX | SHGFI_USEFILEATTRIBUTES);
-
-	return shfi.iIcon;
-}
-
-HRESULT BindToIdl(PCIDLIST_ABSOLUTE pidl, REFIID riid, void **ppv)
-{
-	IShellFolder *pDesktop = nullptr;
-	HRESULT hr = SHGetDesktopFolder(&pDesktop);
-
-	if (SUCCEEDED(hr))
-	{
-		/* See http://blogs.msdn.com/b/oldnewthing/archive/2011/08/30/10202076.aspx. */
-		if (pidl->mkid.cb)
-		{
-			hr = pDesktop->BindToObject(pidl, nullptr, riid, ppv);
-		}
-		else
-		{
-			hr = pDesktop->QueryInterface(riid, ppv);
-		}
-
-		pDesktop->Release();
-	}
-
-	return hr;
+	return S_OK;
 }
 
 HRESULT GetUIObjectOf(IShellFolder *pShellFolder, HWND hwndOwner, UINT cidl,
@@ -578,6 +593,20 @@ std::wstring ConvertBstrToString(BSTR str)
 	return { str, SysStringLen(str) };
 }
 
+std::wstring GetFolderPathForDisplayWithFallback(PCIDLIST_ABSOLUTE pidl)
+{
+	auto path = GetFolderPathForDisplay(pidl);
+
+	if (!path)
+	{
+		DCHECK(false);
+
+		return DISPLAY_NAME_FALLBACK;
+	}
+
+	return *path;
+}
+
 // Returns either the parsing path for the specified item, or its in
 // folder name. The in folder name will be returned when the parsing
 // path is a GUID (which typically shouldn't be displayed to the user).
@@ -689,6 +718,11 @@ std::optional<std::wstring> TransformUserEnteredPathToAbsolutePath(
 			// SHParseDisplayName().
 			return updatedPath;
 		}
+		else if (parsedUrl.nScheme == URL_SCHEME_SEARCH_MS)
+		{
+			// This is a search-ms: URL.
+			return updatedPath;
+		}
 		else if (parsedUrl.nScheme == URL_SCHEME_FILE)
 		{
 			// If the path is a file: URL, it should be absolute, meaning it can be returned
@@ -697,6 +731,10 @@ std::optional<std::wstring> TransformUserEnteredPathToAbsolutePath(
 			// https://datatracker.ietf.org/doc/html/rfc8089#appendix-E.2.1), so the path returned
 			// here can still be normalized.
 			return MaybeExtractPathFromFileUrl(updatedPath);
+		}
+		else if (parsedUrl.nScheme == URL_SCHEME_FTP)
+		{
+			return updatedPath;
 		}
 		else
 		{
@@ -726,13 +764,19 @@ bool ShouldNormalizePath(const std::wstring &path)
 	parsedUrl.cbSize = sizeof(parsedUrl);
 	HRESULT hr = ParseURL(path.c_str(), &parsedUrl);
 
-	// Shell folder paths can't contain relative references.
-	if (SUCCEEDED(hr) && parsedUrl.nScheme == URL_SCHEME_SHELL)
+	if (FAILED(hr))
 	{
-		return false;
+		// The path isn't a URL, so it can be normalized.
+		return true;
 	}
 
-	return true;
+	// These URL types can contain relative references.
+	if (parsedUrl.nScheme == URL_SCHEME_FILE)
+	{
+		return true;
+	}
+
+	return false;
 }
 
 std::optional<std::wstring> MaybeExtractPathFromFileUrl(const std::wstring &url)
@@ -743,7 +787,7 @@ std::optional<std::wstring> MaybeExtractPathFromFileUrl(const std::wstring &url)
 	}
 
 	TCHAR path[MAX_PATH];
-	DWORD size = SIZEOF_ARRAY(path);
+	DWORD size = std::size(path);
 	HRESULT hr = PathCreateFromUrl(url.c_str(), path, &size, 0);
 
 	if (FAILED(hr))
@@ -854,7 +898,7 @@ std::optional<std::wstring> PathAppendWrapper(const std::wstring &path,
 	}
 
 	TCHAR finalPath[MAX_PATH];
-	StringCchCopy(finalPath, SIZEOF_ARRAY(finalPath), path.c_str());
+	StringCchCopy(finalPath, std::size(finalPath), path.c_str());
 	BOOL res = PathAppend(finalPath, pathToAppend.c_str());
 
 	if (!res)
@@ -873,7 +917,7 @@ std::optional<std::wstring> PathStripToRootWrapper(const std::wstring &path)
 	}
 
 	TCHAR root[MAX_PATH];
-	StringCchCopy(root, SIZEOF_ARRAY(root), path.c_str());
+	StringCchCopy(root, std::size(root), path.c_str());
 	BOOL res = PathStripToRoot(root);
 
 	if (!res)
@@ -1056,158 +1100,6 @@ HRESULT AddJumpListTaskInternal(IObjectCollection *objectCollection, const TCHAR
 	return hr;
 }
 
-/* Returns a list of DLL's/IUnknown interfaces. Note that
-is up to the caller to free both the DLL's and objects
-returned.
-
-http://www.ureader.com/msg/16601280.aspx
-
-Also note that a set of blacklisted CLSID entries can be
-provided. Any entries in this set will be ignored (i.e. they
-won't be loaded). Each entry should be a CLSID with the enclosing
-braces included. */
-BOOL LoadContextMenuHandlers(const TCHAR *szRegKey,
-	std::list<ContextMenuHandler> &contextMenuHandlers,
-	const std::vector<std::wstring> &blacklistedCLSIDEntries)
-{
-	HKEY hKey = nullptr;
-	BOOL bSuccess = FALSE;
-
-	LONG lRes = RegOpenKeyEx(HKEY_CLASSES_ROOT, szRegKey, 0, KEY_READ, &hKey);
-
-	if (lRes == ERROR_SUCCESS)
-	{
-		TCHAR szKeyName[512];
-		int iIndex = 0;
-
-		DWORD dwLen = SIZEOF_ARRAY(szKeyName);
-
-		while ((lRes = RegEnumKeyEx(hKey, iIndex, szKeyName, &dwLen, nullptr, nullptr, nullptr,
-					nullptr))
-			== ERROR_SUCCESS)
-		{
-			HKEY hSubKey;
-			TCHAR szSubKey[512];
-			LONG lSubKeyRes;
-
-			StringCchPrintf(szSubKey, SIZEOF_ARRAY(szSubKey), _T("%s\\%s"), szRegKey, szKeyName);
-
-			lSubKeyRes = RegOpenKeyEx(HKEY_CLASSES_ROOT, szSubKey, 0, KEY_READ, &hSubKey);
-
-			if (lSubKeyRes == ERROR_SUCCESS)
-			{
-				std::wstring clsid;
-				LSTATUS clsidRes = RegistrySettings::ReadString(hSubKey, L"", clsid);
-
-				if (clsidRes == ERROR_SUCCESS)
-				{
-					if (std::none_of(blacklistedCLSIDEntries.begin(), blacklistedCLSIDEntries.end(),
-							[&clsid](const std::wstring &blacklistedEntry)
-							{
-								return boost::iequals(clsid, blacklistedEntry);
-							}))
-					{
-						ContextMenuHandler contextMenuHandler;
-
-						BOOL bRes = LoadIUnknownFromCLSID(clsid.c_str(), &contextMenuHandler);
-
-						if (bRes)
-						{
-							contextMenuHandlers.push_back(contextMenuHandler);
-						}
-					}
-				}
-
-				RegCloseKey(hSubKey);
-			}
-
-			dwLen = SIZEOF_ARRAY(szKeyName);
-			iIndex++;
-		}
-
-		RegCloseKey(hKey);
-
-		bSuccess = TRUE;
-	}
-
-	return bSuccess;
-}
-
-/* Extracts an IUnknown interface from a class object,
-based on its CLSID. If the CLSID exists in
-HKLM\Software\Classes\CLSID, the DLL for this object
-will attempted to be loaded.
-Regardless of whether or not a DLL was actually
-loaded, the object will be initialized with a call
-to CoCreateInstance. */
-BOOL LoadIUnknownFromCLSID(const TCHAR *szCLSID, ContextMenuHandler *pContextMenuHandler)
-{
-	HKEY hCLSIDKey;
-	HKEY hDllKey;
-	HMODULE hDLL = nullptr;
-	TCHAR szCLSIDKey[512];
-	LONG lRes;
-	BOOL bSuccess = FALSE;
-
-	StringCchPrintf(szCLSIDKey, SIZEOF_ARRAY(szCLSIDKey), _T("%s\\%s"),
-		_T("Software\\Classes\\CLSID"), szCLSID);
-
-	/* Open the CLSID key. */
-	lRes = RegOpenKeyEx(HKEY_LOCAL_MACHINE, szCLSIDKey, 0, KEY_READ, &hCLSIDKey);
-
-	if (lRes == ERROR_SUCCESS)
-	{
-		lRes = RegOpenKeyEx(hCLSIDKey, _T("InProcServer32"), 0, KEY_READ, &hDllKey);
-
-		if (lRes == ERROR_SUCCESS)
-		{
-			std::wstring dll;
-			LSTATUS dllRes = RegistrySettings::ReadString(hDllKey, L"", dll);
-
-			if (dllRes == ERROR_SUCCESS)
-			{
-				/* Now, load the DLL it refers to. */
-				hDLL = LoadLibrary(dll.c_str());
-			}
-
-			RegCloseKey(hDllKey);
-		}
-
-		RegCloseKey(hCLSIDKey);
-	}
-
-	CLSID clsid;
-
-	/* Regardless of whether or not any DLL was
-	loaded, attempt to create the object. */
-	HRESULT hr = CLSIDFromString(szCLSID, &clsid);
-
-	if (hr == NO_ERROR)
-	{
-		IUnknown *pUnknown = nullptr;
-
-		hr = CoCreateInstance(clsid, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pUnknown));
-
-		if (hr == S_OK)
-		{
-			bSuccess = TRUE;
-
-			pContextMenuHandler->hDLL = hDLL;
-			pContextMenuHandler->pUnknown = pUnknown;
-		}
-	}
-
-	if (!bSuccess)
-	{
-		if (hDLL != nullptr)
-		{
-			FreeLibrary(hDLL);
-		}
-	}
-
-	return bSuccess;
-}
-
 HRESULT GetItemInfoTip(const std::wstring &itemPath, std::wstring &outputInfoTip)
 {
 	unique_pidl_absolute pidlItem;
@@ -1253,7 +1145,7 @@ HRESULT ExecuteActionFromContextMenu(PCIDLIST_ABSOLUTE pidlDirectory,
 	IUnknown *site)
 {
 	wil::com_ptr_nothrow<IShellFolder> shellFolder;
-	RETURN_IF_FAILED(BindToIdl(pidlDirectory, IID_PPV_ARGS(&shellFolder)));
+	RETURN_IF_FAILED(SHBindToObject(nullptr, pidlDirectory, nullptr, IID_PPV_ARGS(&shellFolder)));
 
 	wil::com_ptr_nothrow<IContextMenu> contextMenu;
 
@@ -1285,7 +1177,7 @@ HRESULT ExecuteActionFromContextMenu(PCIDLIST_ABSOLUTE pidlDirectory,
 		}
 	}
 
-	auto actionNarrow = wstrToStr(action);
+	auto actionNarrow = WstrToStr(action);
 
 	if (!actionNarrow)
 	{
@@ -1299,7 +1191,7 @@ HRESULT ExecuteActionFromContextMenu(PCIDLIST_ABSOLUTE pidlDirectory,
 	commandInfo.lpVerb = actionNarrow->c_str();
 	commandInfo.lpParameters = nullptr;
 	commandInfo.lpDirectory = nullptr;
-	commandInfo.nShow = SW_SHOW;
+	commandInfo.nShow = SW_SHOWNORMAL;
 	RETURN_IF_FAILED(contextMenu->InvokeCommand(&commandInfo));
 
 	return S_OK;
@@ -1332,70 +1224,34 @@ bool IsChildOfLibrariesFolder(PCIDLIST_ABSOLUTE pidl)
 	return ILIsParent(pidlLibraries.get(), pidl, FALSE);
 }
 
-class FileSystemBindData : public IFileSystemBindData
+class FileSystemBindData :
+	public winrt::implements<FileSystemBindData, IFileSystemBindData, winrt::non_agile>
 {
 public:
-	static wil::com_ptr_nothrow<FileSystemBindData> Create(const WIN32_FIND_DATA *wfd)
+	FileSystemBindData(const WIN32_FIND_DATA *wfd) : m_wfd(*wfd)
 	{
-		wil::com_ptr_nothrow<FileSystemBindData> fsBindData;
-		fsBindData.attach(new FileSystemBindData(wfd));
-		return fsBindData;
 	}
 
-	IFACEMETHODIMP QueryInterface(REFIID riid, void **ppvObject)
-	{
-		// clang-format off
-		static const QITAB qit[] = {
-			QITABENT(FileSystemBindData, IFileSystemBindData),
-			{ nullptr }
-		};
-		// clang-format on
-
-		return QISearch(this, qit, riid, ppvObject);
-	}
-
-	IFACEMETHODIMP_(ULONG) AddRef(void)
-	{
-		return InterlockedIncrement(&m_refCount);
-	}
-
-	IFACEMETHODIMP_(ULONG) Release(void)
-	{
-		ULONG refCount = InterlockedDecrement(&m_refCount);
-
-		if (refCount == 0)
-		{
-			delete this;
-		}
-
-		return refCount;
-	}
-
-	IFACEMETHODIMP SetFindData(const WIN32_FIND_DATAW *wfd)
+	IFACEMETHODIMP SetFindData(const WIN32_FIND_DATA *wfd)
 	{
 		m_wfd = *wfd;
 		return S_OK;
 	}
 
-	IFACEMETHODIMP GetFindData(WIN32_FIND_DATAW *wfd)
+	IFACEMETHODIMP GetFindData(WIN32_FIND_DATA *wfd)
 	{
 		*wfd = m_wfd;
 		return S_OK;
 	}
 
 private:
-	ULONG m_refCount;
 	WIN32_FIND_DATA m_wfd;
-
-	FileSystemBindData(const WIN32_FIND_DATA *wfd) : m_refCount(1), m_wfd(*wfd)
-	{
-	}
 };
 
 // This performs the same function as SHSimpleIDListFromPath(), which is deprecated.
 // The path provided should be relative to the parent. If parent is null, the path should be
 // absolute.
-HRESULT CreateSimplePidl(const std::wstring &path, PIDLIST_ABSOLUTE *pidl, IShellFolder *parent,
+HRESULT CreateSimplePidl(const std::wstring &path, PidlAbsolute &outputPidl, IShellFolder *parent,
 	ShellItemType shellItemType)
 {
 	wil::com_ptr_nothrow<IBindCtx> bindCtx;
@@ -1417,14 +1273,15 @@ HRESULT CreateSimplePidl(const std::wstring &path, PIDLIST_ABSOLUTE *pidl, IShel
 		break;
 	}
 
-	auto fsBindData = FileSystemBindData::Create(&wfd);
+	auto fsBindData = winrt::make<FileSystemBindData>(&wfd);
 
 	RETURN_IF_FAILED(
 		bindCtx->RegisterObjectParam(const_cast<PWSTR>(STR_FILE_SYS_BIND_DATA), fsBindData.get()));
 
 	if (!parent)
 	{
-		return SHParseDisplayName(path.c_str(), bindCtx.get(), pidl, 0, nullptr);
+		return SHParseDisplayName(path.c_str(), bindCtx.get(), PidlOutParam(outputPidl), 0,
+			nullptr);
 	}
 
 	unique_pidl_relative pidlRelative;
@@ -1434,65 +1291,20 @@ HRESULT CreateSimplePidl(const std::wstring &path, PIDLIST_ABSOLUTE *pidl, IShel
 	unique_pidl_absolute pidlParent;
 	RETURN_IF_FAILED(SHGetIDListFromObject(parent, wil::out_param(pidlParent)));
 
-	*pidl = ILCombine(pidlParent.get(), pidlRelative.get());
+	outputPidl.TakeOwnership(ILCombine(pidlParent.get(), pidlRelative.get()));
 
 	return S_OK;
 }
 
-// This performs the same function as SHGetRealIDL, which is deprecated.
-HRESULT SimplePidlToFullPidl(PCIDLIST_ABSOLUTE simplePidl, PIDLIST_ABSOLUTE *fullPidl)
+// Updates a PIDL. This can be used both to transform a simple pidl into a full pidl, as well as
+// update an existing full pidl.
+HRESULT UpdatePidl(PCIDLIST_ABSOLUTE inputPidl, PidlAbsolute &outputPidl)
 {
 	wil::com_ptr_nothrow<IShellItem2> shellItem2;
-	RETURN_IF_FAILED(SHCreateItemFromIDList(simplePidl, IID_PPV_ARGS(&shellItem2)));
+	RETURN_IF_FAILED(SHCreateItemFromIDList(inputPidl, IID_PPV_ARGS(&shellItem2)));
 	RETURN_IF_FAILED(shellItem2->Update(nullptr));
-
-	wil::com_ptr_nothrow<IParentAndItem> parentAndItem;
-	RETURN_IF_FAILED(shellItem2->QueryInterface(IID_PPV_ARGS(&parentAndItem)));
-
-	unique_pidl_absolute parent;
-	unique_pidl_child child;
-	RETURN_IF_FAILED(
-		parentAndItem->GetParentAndItem(wil::out_param(parent), nullptr, wil::out_param(child)));
-
-	*fullPidl = ILCombine(parent.get(), child.get());
-
+	RETURN_IF_FAILED(SHGetIDListFromObject(shellItem2.get(), PidlOutParam(outputPidl)));
 	return S_OK;
-}
-
-std::vector<unique_pidl_absolute> DeepCopyPidls(const std::vector<PCIDLIST_ABSOLUTE> &pidls)
-{
-	std::vector<unique_pidl_absolute> copiedPidls;
-	copiedPidls.reserve(pidls.size());
-	std::transform(pidls.begin(), pidls.end(), std::back_inserter(copiedPidls),
-		[](const PCIDLIST_ABSOLUTE &pidl)
-		{
-			return unique_pidl_absolute(ILCloneFull(pidl));
-		});
-	return copiedPidls;
-}
-
-std::vector<unique_pidl_absolute> DeepCopyPidls(const std::vector<unique_pidl_absolute> &pidls)
-{
-	std::vector<unique_pidl_absolute> copiedPidls;
-	copiedPidls.reserve(pidls.size());
-	std::transform(pidls.begin(), pidls.end(), std::back_inserter(copiedPidls),
-		[](const unique_pidl_absolute &pidl)
-		{
-			return unique_pidl_absolute(ILCloneFull(pidl.get()));
-		});
-	return copiedPidls;
-}
-
-std::vector<PCIDLIST_ABSOLUTE> ShallowCopyPidls(const std::vector<unique_pidl_absolute> &pidls)
-{
-	std::vector<PCIDLIST_ABSOLUTE> rawPidls;
-	rawPidls.reserve(pidls.size());
-	std::transform(pidls.begin(), pidls.end(), std::back_inserter(rawPidls),
-		[](const unique_pidl_absolute &pidl)
-		{
-			return pidl.get();
-		});
-	return rawPidls;
 }
 
 std::size_t hash_value(const IID &iid)
@@ -1503,4 +1315,156 @@ std::size_t hash_value(const IID &iid)
 	boost::hash_combine(seed, iid.Data3);
 	boost::hash_combine(seed, iid.Data4);
 	return seed;
+}
+
+// When calling IBindCtx::RegisterObjectParam(), a valid COM object instance needs to be provided,
+// even if it's not actually used to carry any data. Therefore, this class exists purely for that
+// purpose.
+class DummyUnknown : public winrt::implements<DummyUnknown, IUnknown, winrt::non_agile>
+{
+};
+
+HRESULT CreateBindCtxWithParam(const std::wstring &param,
+	wil::com_ptr_nothrow<IBindCtx> &outputBindCtx)
+{
+	wil::com_ptr_nothrow<IBindCtx> bindCtx;
+	RETURN_IF_FAILED(CreateBindCtx(0, &bindCtx));
+
+	// The second parameter here needs to be a valid pointer to a COM object, even though the
+	// parameter isn't actually used.
+	auto dummyUnknown = winrt::make_self<DummyUnknown>();
+	RETURN_IF_FAILED(
+		bindCtx->RegisterObjectParam(const_cast<PWSTR>(param.c_str()), dummyUnknown.get()));
+
+	outputBindCtx = bindCtx;
+
+	return S_OK;
+}
+
+HRESULT ParseDisplayNameForNavigation(const std::wstring &itemPath, unique_pidl_absolute &pidlItem)
+{
+	// Using this ensures that a search-ms: URL will be treated as a folder. Without this,
+	// attempting to enumerate the items associated with a search-ms: URL will fail.
+	// This also appears to impact the pidl returned for certain paths.
+	// https://explorerplusplus.com/forum/viewtopic.php?t=3185 describes an issue in which the
+	// "Downloads" folder wouldn't be selected in the treeview when navigating to it via its path.
+	// From some investigation, it appears that's because the pidl returned by SHParseDisplayName()
+	// would refer to an item in the root desktop folder, but not the "Downloads" item that normally
+	// appears.
+	// By passing the STR_PARSE_PREFER_FOLDER_BROWSING option, the pidl that's returned in that
+	// situation will be for the filesystem folder specifically, which then means that folder will
+	// be correctly selected in the treeview.
+	// Note that the return value of this function is only DCHECK'd. It's not expected that the call
+	// would fail, but if it does, bindCtx will be empty and the value passed through to
+	// SHParseDisplayName() will be null, which is valid.
+	wil::com_ptr_nothrow<IBindCtx> bindCtx;
+	HRESULT hr = CreateBindCtxWithParam(STR_PARSE_PREFER_FOLDER_BROWSING, bindCtx);
+	DCHECK(SUCCEEDED(hr));
+
+	return SHParseDisplayName(itemPath.c_str(), bindCtx.get(), wil::out_param(pidlItem), 0,
+		nullptr);
+}
+
+HRESULT MaybeGetLinkTarget(PCIDLIST_ABSOLUTE pidl, unique_pidl_absolute &targetPidl)
+{
+	return MaybeGetLinkTarget(nullptr, pidl, LinkTargetRetrievalType::DontResolve, targetPidl);
+}
+
+HRESULT MaybeResolveLinkTarget(HWND hwnd, PCIDLIST_ABSOLUTE pidl, unique_pidl_absolute &targetPidl)
+{
+	return MaybeGetLinkTarget(hwnd, pidl, LinkTargetRetrievalType::Resolve, targetPidl);
+}
+
+// If the specified item supports the IShellLink interface - that is, the item is a shortcut (i.e. a
+// .lnk file), symlink (i.e. created by mklink) or virtual link object (e.g. an item in the quick
+// access folder), this function will return the target pidl.
+// Depending on the LinkTargetRetrievalType, the target will be resolved by the shell, which may
+// result in a dialog being shown to the user (if the target doesn't currently exist).
+HRESULT MaybeGetLinkTarget(HWND hwnd, PCIDLIST_ABSOLUTE pidl, LinkTargetRetrievalType retrievalType,
+	unique_pidl_absolute &targetPidl)
+{
+	wil::com_ptr_nothrow<IShellItem> shellItem;
+	RETURN_IF_FAILED(SHCreateItemFromIDList(pidl, IID_PPV_ARGS(&shellItem)));
+
+	wil::com_ptr_nothrow<IShellLink> shellLink;
+	RETURN_IF_FAILED(shellItem->BindToHandler(nullptr, BHID_SFUIObject, IID_PPV_ARGS(&shellLink)));
+
+	if (retrievalType == LinkTargetRetrievalType::Resolve)
+	{
+		HRESULT hr = shellLink->Resolve(hwnd, SLR_UPDATE);
+
+		if (FAILED(hr))
+		{
+			return hr;
+		}
+
+		// S_FALSE can be returned in situations like the following:
+		//
+		// When the target of a shortcut has been deleted and IShellLink::Resolve() is called, the
+		// shell can show a dialog that contains three options:
+		//
+		// - One that allows the target to be restored from the recycle bin.
+		// - One that allows the shortcut to be deleted.
+		// - One that allows the operation to be canceled.
+		//
+		// In the latter two cases, S_FALSE will be returned and is effectively an error. That is,
+		// if S_FALSE is returned, the target won't exist.
+		if (hr == S_FALSE)
+		{
+			return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
+		}
+	}
+
+	RETURN_IF_FAILED(shellLink->GetIDList(wil::out_param(targetPidl)));
+
+	return S_OK;
+}
+
+ShellIconInfo ExtractShellIconParts(int iconIndexAndOverlay)
+{
+	// The operations below are only valid if an int is 4 bytes.
+	static_assert(sizeof(int) == 4);
+	return { iconIndexAndOverlay & 0x00FFFFFF, (iconIndexAndOverlay >> 24) & 0xFF };
+}
+
+PidlAbsolute GetClosestExistingItem(PCIDLIST_ABSOLUTE pidl)
+{
+	PidlAbsolute currentPidl = pidl;
+
+	do
+	{
+		if (DoesItemExist(currentPidl.Raw()))
+		{
+			return currentPidl;
+		}
+	} while (ILRemoveLastID(currentPidl.Raw()));
+
+	// This point shouldn't be reached, as there should always be a parent that exists (e.g. the
+	// root folder always exists), so the above loop should always find an existing item.
+	DCHECK(false);
+
+	return nullptr;
+}
+
+bool DoesItemExist(PCIDLIST_ABSOLUTE pidl)
+{
+	wil::com_ptr_nothrow<IShellItem> shellItem;
+	HRESULT hr = SHCreateItemFromIDList(pidl, IID_PPV_ARGS(&shellItem));
+
+	if (FAILED(hr))
+	{
+		return false;
+	}
+
+	SFGAOF attributes = SFGAO_VALIDATE;
+	hr = shellItem->GetAttributes(attributes, &attributes);
+
+	if (FAILED(hr))
+	{
+		return false;
+	}
+
+	// SFGAO_VALIDATE is never returned in the output attributes, so provided the call above
+	// succeeded, the item exists.
+	return true;
 }

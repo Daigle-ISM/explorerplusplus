@@ -5,28 +5,38 @@
 #pragma once
 
 #include "PreservedTab.h"
-#include "../Helper/Macros.h"
+#include <boost/core/noncopyable.hpp>
 #include <boost/signals2.hpp>
+#include <list>
+#include <vector>
 
-class TabContainer;
+class BrowserList;
+class TabEvents;
 
-class TabRestorer
+class TabRestorer : private boost::noncopyable
 {
 public:
-	TabRestorer(TabContainer *tabContainer);
+	using ItemsChangedSignal = boost::signals2::signal<void()>;
 
-	const std::vector<std::unique_ptr<PreservedTab>> &GetClosedTabs() const;
+	TabRestorer(TabEvents *tabEvents, const BrowserList *browserList);
+
+	const std::list<std::unique_ptr<PreservedTab>> &GetClosedTabs() const;
 	const PreservedTab *GetTabById(int id) const;
+	bool IsEmpty() const;
 	void RestoreLastTab();
 	void RestoreTabById(int id);
 
+	boost::signals2::connection AddItemsChangedObserver(
+		const ItemsChangedSignal::slot_type &observer);
+
 private:
-	DISALLOW_COPY_AND_ASSIGN(TabRestorer);
+	void OnTabPreRemoval(const Tab &tab, int index);
+	void RestoreTabIntoBrowser(const PreservedTab *tab);
 
-	void OnTabPreRemoval(const Tab &tab);
+	const BrowserList *const m_browserList;
 
-	TabContainer *m_tabContainer;
 	std::vector<boost::signals2::scoped_connection> m_connections;
 
-	std::vector<std::unique_ptr<PreservedTab>> m_closedTabs;
+	std::list<std::unique_ptr<PreservedTab>> m_closedTabs;
+	ItemsChangedSignal m_itemsChangedSignal;
 };

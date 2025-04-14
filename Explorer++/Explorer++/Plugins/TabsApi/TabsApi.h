@@ -7,12 +7,13 @@
 #include "ShellBrowser/SortModes.h"
 #include "ShellBrowser/ViewModes.h"
 #include "Tab.h"
-#include <optional>
 #include <sol/forward.hpp>
+#include <optional>
 
 class CoreInterface;
-class ShellBrowser;
-class TabContainer;
+struct FolderSettings;
+class ShellBrowserImpl;
+class TabContainerImpl;
 struct TabSettings;
 
 namespace Plugins
@@ -31,7 +32,7 @@ public:
 		bool showInGroups;
 		bool showHidden;
 
-		FolderSettings(const ShellBrowser &shellBrowser);
+		FolderSettings(const ShellBrowserImpl &shellBrowser);
 		std::wstring toString();
 	};
 
@@ -51,7 +52,7 @@ public:
 		std::wstring toString();
 	};
 
-	TabsApi(CoreInterface *coreInterface, TabContainer *tabContainer);
+	TabsApi(CoreInterface *coreInterface, TabContainerImpl *tabContainerImpl);
 
 	std::vector<Tab> getAll();
 	std::optional<Tab> get(int tabId);
@@ -67,6 +68,6 @@ private:
 		::FolderSettings &folderSettings);
 
 	CoreInterface *m_coreInterface;
-	TabContainer *m_tabContainer;
+	TabContainerImpl *m_tabContainerImpl;
 };
 }

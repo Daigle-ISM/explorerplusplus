@@ -8,10 +8,9 @@
 #include "ColorRuleModel.h"
 #include "MainResource.h"
 #include "ResourceHelper.h"
-#include "../Helper/Macros.h"
 #include "../Helper/StringHelper.h"
 #include "../Helper/WindowHelper.h"
-#include "../Helper/WindowSubclassWrapper.h"
+#include "../Helper/WindowSubclass.h"
 #include "../Helper/XMLSettings.h"
 #include <wil/resource.h>
 
@@ -20,8 +19,9 @@ const TCHAR ColorRuleEditorDialogPersistentSettings::SETTINGS_KEY[] = _T("ColorR
 const TCHAR ColorRuleEditorDialogPersistentSettings::SETTING_CUSTOM_COLORS[] = _T("CustomColors");
 
 ColorRuleEditorDialog::ColorRuleEditorDialog(HINSTANCE resourceInstance, HWND parent,
-	ColorRuleModel *model, std::unique_ptr<EditDetails> editDetails) :
-	ThemedDialog(resourceInstance, IDD_NEW_COLOR_RULE, parent, DialogSizingType::None),
+	ThemeManager *themeManager, ColorRuleModel *model, std::unique_ptr<EditDetails> editDetails) :
+	ThemedDialog(resourceInstance, IDD_NEW_COLOR_RULE, parent, DialogSizingType::None,
+		themeManager),
 	m_model(model),
 	m_editDetails(std::move(editDetails))
 {
@@ -87,7 +87,7 @@ INT_PTR ColorRuleEditorDialog::OnInitDialog()
 	}
 
 	HWND staticColorControl = GetDlgItem(m_hDlg, IDC_STATIC_COLOR);
-	m_windowSubclasses.push_back(std::make_unique<WindowSubclassWrapper>(staticColorControl,
+	m_windowSubclasses.push_back(std::make_unique<WindowSubclass>(staticColorControl,
 		std::bind_front(&ColorRuleEditorDialog::StaticColorControlProc, this)));
 
 	SendMessage(GetDlgItem(m_hDlg, IDC_EDIT_DESCRIPTION), EM_SETSEL, 0, -1);
@@ -250,7 +250,7 @@ void ColorRuleEditorDialog::OnChangeColor()
 	}
 }
 
-LRESULT CALLBACK ColorRuleEditorDialog::StaticColorControlProc(HWND hwnd, UINT msg, WPARAM wParam,
+LRESULT ColorRuleEditorDialog::StaticColorControlProc(HWND hwnd, UINT msg, WPARAM wParam,
 	LPARAM lParam)
 {
 	switch (msg)
@@ -275,7 +275,7 @@ LRESULT CALLBACK ColorRuleEditorDialog::StaticColorControlProc(HWND hwnd, UINT m
 ColorRuleEditorDialogPersistentSettings::ColorRuleEditorDialogPersistentSettings() :
 	DialogSettings(SETTINGS_KEY)
 {
-	for (int i = 0; i < SIZEOF_ARRAY(m_customColors); i++)
+	for (size_t i = 0; i < std::size(m_customColors); i++)
 	{
 		m_customColors[i] = RGB(255, 255, 255);
 	}
@@ -305,17 +305,17 @@ void ColorRuleEditorDialogPersistentSettings::SaveExtraXMLSettings(IXMLDOMDocume
 {
 	TCHAR szNode[32];
 
-	for (int i = 0; i < SIZEOF_ARRAY(m_customColors); i++)
+	for (size_t i = 0; i < std::size(m_customColors); i++)
 	{
-		StringCchPrintf(szNode, SIZEOF_ARRAY(szNode), _T("r%d"), i);
-		NXMLSettings::AddAttributeToNode(pXMLDom, pParentNode, szNode,
-			NXMLSettings::EncodeIntValue(GetRValue(m_customColors[i])));
-		StringCchPrintf(szNode, SIZEOF_ARRAY(szNode), _T("g%d"), i);
-		NXMLSettings::AddAttributeToNode(pXMLDom, pParentNode, szNode,
-			NXMLSettings::EncodeIntValue(GetGValue(m_customColors[i])));
-		StringCchPrintf(szNode, SIZEOF_ARRAY(szNode), _T("b%d"), i);
-		NXMLSettings::AddAttributeToNode(pXMLDom, pParentNode, szNode,
-			NXMLSettings::EncodeIntValue(GetBValue(m_customColors[i])));
+		StringCchPrintf(szNode, std::size(szNode), _T("r%d"), i);
+		XMLSettings::AddAttributeToNode(pXMLDom, pParentNode, szNode,
+			XMLSettings::EncodeIntValue(GetRValue(m_customColors[i])));
+		StringCchPrintf(szNode, std::size(szNode), _T("g%d"), i);
+		XMLSettings::AddAttributeToNode(pXMLDom, pParentNode, szNode,
+			XMLSettings::EncodeIntValue(GetGValue(m_customColors[i])));
+		StringCchPrintf(szNode, std::size(szNode), _T("b%d"), i);
+		XMLSettings::AddAttributeToNode(pXMLDom, pParentNode, szNode,
+			XMLSettings::EncodeIntValue(GetBValue(m_customColors[i])));
 	}
 }
 
@@ -344,7 +344,7 @@ void ColorRuleEditorDialogPersistentSettings::LoadExtraXMLSettings(BSTR bstrName
 		}
 
 		COLORREF clr = m_customColors[iIndex];
-		BYTE c = static_cast<BYTE>(NXMLSettings::DecodeIntValue(bstrValue));
+		BYTE c = static_cast<BYTE>(XMLSettings::DecodeIntValue(bstrValue));
 
 		if (CheckWildcardMatch(_T("r*"), bstrName, TRUE))
 		{

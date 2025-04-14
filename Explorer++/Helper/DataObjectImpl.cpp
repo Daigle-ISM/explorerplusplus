@@ -7,51 +7,21 @@
 #include "EnumFormatEtcImpl.h"
 #include <list>
 
-DataObjectImpl::DataObjectImpl(FORMATETC *pFormatEtc, STGMEDIUM *pMedium, int count)
-{
-	for (int i = 0; i < count; i++)
-	{
-		DataObjectInternal dao = { pFormatEtc[i], pMedium[i] };
-		m_daoList.push_back(dao);
-	}
-
-	SetAsyncMode(FALSE);
-
-	m_bInOperation = FALSE;
-}
-
-DataObjectImpl::~DataObjectImpl()
-{
-	for (auto dao : m_daoList)
-	{
-		ReleaseStgMedium(&dao.stg);
-	}
-}
-
 // IDataObject
-IFACEMETHODIMP DataObjectImpl::GetData(FORMATETC *pFormatEtc, STGMEDIUM *pMedium)
+IFACEMETHODIMP DataObjectImpl::GetData(FORMATETC *format, STGMEDIUM *stg)
 {
-	if (pFormatEtc == nullptr || pMedium == nullptr)
+	if (format == nullptr || stg == nullptr)
 	{
 		return E_INVALIDARG;
 	}
 
-	if (QueryGetData(pFormatEtc) == DV_E_FORMATETC)
+	for (const auto &item : m_items)
 	{
-		return DV_E_FORMATETC;
-	}
-
-	for (const auto &dao : m_daoList)
-	{
-		if (dao.fe.cfFormat == pFormatEtc->cfFormat && dao.fe.tymed & pFormatEtc->tymed
-			&& dao.fe.dwAspect == pFormatEtc->dwAspect)
+		if (item.format.cfFormat == format->cfFormat && item.format.tymed & format->tymed
+			&& item.format.dwAspect == format->dwAspect && item.format.lindex == format->lindex)
 		{
-			BOOL bRet = DuplicateStorageMedium(pMedium, &dao.stg, &dao.fe);
-
-			if (!bRet)
-			{
-				return STG_E_MEDIUMFULL;
-			}
+			auto duplicatedStg = DuplicateStorageMedium(&item.stg, &item.format);
+			*stg = duplicatedStg.release();
 
 			return S_OK;
 		}
@@ -60,38 +30,46 @@ IFACEMETHODIMP DataObjectImpl::GetData(FORMATETC *pFormatEtc, STGMEDIUM *pMedium
 	return DV_E_FORMATETC;
 }
 
-BOOL DataObjectImpl::DuplicateStorageMedium(STGMEDIUM *pstgDest, const STGMEDIUM *pstgSrc,
-	const FORMATETC *pftc)
+wil::unique_stg_medium DataObjectImpl::DuplicateStorageMedium(const STGMEDIUM *stg,
+	const FORMATETC *format)
 {
-	pstgDest->tymed = pstgSrc->tymed;
-	pstgDest->pUnkForRelease = nullptr;
+	wil::unique_stg_medium duplicateStg;
 
-	if (pstgSrc->pUnkForRelease != nullptr)
-	{
-		pstgDest->pUnkForRelease = pstgSrc->pUnkForRelease;
-		pstgSrc->pUnkForRelease->AddRef();
-	}
-
-	BOOL success = TRUE;
-
-	switch (pftc->tymed)
+	switch (format->tymed)
 	{
 	case TYMED_HGLOBAL:
+		duplicateStg.hGlobal =
+			static_cast<HGLOBAL>(OleDuplicateData(stg->hGlobal, format->cfFormat, 0));
+		break;
+
 	case TYMED_FILE:
+		duplicateStg.lpszFileName =
+			static_cast<LPOLESTR>(OleDuplicateData(stg->lpszFileName, format->cfFormat, 0));
+		break;
+
 	case TYMED_GDI:
+		duplicateStg.hBitmap =
+			static_cast<HBITMAP>(OleDuplicateData(stg->hBitmap, format->cfFormat, 0));
+		break;
+
 	case TYMED_MFPICT:
+		duplicateStg.hMetaFilePict =
+			static_cast<HMETAFILEPICT>(OleDuplicateData(stg->hMetaFilePict, format->cfFormat, 0));
+		break;
+
 	case TYMED_ENHMF:
-		success = DuplicateData(pstgDest, pstgSrc, pftc);
+		duplicateStg.hEnhMetaFile =
+			static_cast<HENHMETAFILE>(OleDuplicateData(stg->hEnhMetaFile, format->cfFormat, 0));
 		break;
 
 	case TYMED_ISTREAM:
-		pstgDest->pstm = pstgSrc->pstm;
-		pstgSrc->pstm->AddRef();
+		duplicateStg.pstm = stg->pstm;
+		stg->pstm->AddRef();
 		break;
 
 	case TYMED_ISTORAGE:
-		pstgDest->pstg = pstgSrc->pstg;
-		pstgSrc->pstg->AddRef();
+		duplicateStg.pstg = stg->pstg;
+		stg->pstg->AddRef();
 		break;
 
 	case TYMED_NULL:
@@ -99,64 +77,36 @@ BOOL DataObjectImpl::DuplicateStorageMedium(STGMEDIUM *pstgDest, const STGMEDIUM
 		break;
 	}
 
-	return success;
-}
+	duplicateStg.tymed = stg->tymed;
+	duplicateStg.pUnkForRelease = stg->pUnkForRelease;
 
-BOOL DataObjectImpl::DuplicateData(STGMEDIUM *pstgDest, const STGMEDIUM *pstgSrc,
-	const FORMATETC *pftc)
-{
-	HANDLE hData = OleDuplicateData(pstgSrc->hGlobal, pftc->cfFormat, 0);
-
-	if (hData == nullptr)
+	if (duplicateStg.pUnkForRelease)
 	{
-		return FALSE;
+		duplicateStg.pUnkForRelease->AddRef();
 	}
 
-	switch (pftc->tymed)
-	{
-	case TYMED_HGLOBAL:
-		pstgDest->hGlobal = hData;
-		break;
-
-	case TYMED_FILE:
-		pstgDest->lpszFileName = reinterpret_cast<LPOLESTR>(hData);
-		break;
-
-	case TYMED_GDI:
-		pstgDest->hBitmap = reinterpret_cast<HBITMAP>(hData);
-		break;
-
-	case TYMED_MFPICT:
-		pstgDest->hMetaFilePict = hData;
-		break;
-
-	case TYMED_ENHMF:
-		pstgDest->hEnhMetaFile = reinterpret_cast<HENHMETAFILE>(hData);
-		break;
-	}
-
-	return TRUE;
+	return duplicateStg;
 }
 
-IFACEMETHODIMP DataObjectImpl::GetDataHere(FORMATETC *pFormatEtc, STGMEDIUM *pMedium)
+IFACEMETHODIMP DataObjectImpl::GetDataHere(FORMATETC *format, STGMEDIUM *stg)
 {
-	UNREFERENCED_PARAMETER(pFormatEtc);
-	UNREFERENCED_PARAMETER(pMedium);
+	UNREFERENCED_PARAMETER(format);
+	UNREFERENCED_PARAMETER(stg);
 
 	return DV_E_TYMED;
 }
 
-IFACEMETHODIMP DataObjectImpl::QueryGetData(FORMATETC *pFormatEtc)
+IFACEMETHODIMP DataObjectImpl::QueryGetData(FORMATETC *format)
 {
-	if (pFormatEtc == nullptr)
+	if (format == nullptr)
 	{
 		return E_INVALIDARG;
 	}
 
-	for (const auto &dao : m_daoList)
+	for (const auto &item : m_items)
 	{
-		if (dao.fe.cfFormat == pFormatEtc->cfFormat && dao.fe.tymed & pFormatEtc->tymed
-			&& dao.fe.dwAspect == pFormatEtc->dwAspect)
+		if (item.format.cfFormat == format->cfFormat && item.format.tymed & format->tymed
+			&& item.format.dwAspect == format->dwAspect)
 		{
 			return S_OK;
 		}
@@ -165,69 +115,63 @@ IFACEMETHODIMP DataObjectImpl::QueryGetData(FORMATETC *pFormatEtc)
 	return DV_E_FORMATETC;
 }
 
-IFACEMETHODIMP DataObjectImpl::GetCanonicalFormatEtc(FORMATETC *pFormatEtcIn,
-	FORMATETC *pFormatEtcOut)
+IFACEMETHODIMP DataObjectImpl::GetCanonicalFormatEtc(FORMATETC *formatIn, FORMATETC *formatOut)
 {
-	UNREFERENCED_PARAMETER(pFormatEtcIn);
+	UNREFERENCED_PARAMETER(formatIn);
 
-	if (pFormatEtcOut == nullptr)
+	if (formatOut == nullptr)
 	{
 		return E_INVALIDARG;
 	}
 
-	pFormatEtcOut->ptd = nullptr;
+	formatOut->ptd = nullptr;
 
 	return E_NOTIMPL;
 }
 
-IFACEMETHODIMP DataObjectImpl::SetData(FORMATETC *pFormatEtc, STGMEDIUM *pMedium, BOOL fRelease)
+IFACEMETHODIMP DataObjectImpl::SetData(FORMATETC *format, STGMEDIUM *stg, BOOL release)
 {
-	if (pFormatEtc == nullptr || pMedium == nullptr)
+	if (format == nullptr || stg == nullptr)
 	{
 		return E_INVALIDARG;
 	}
 
-	DataObjectInternal dao;
+	ItemData itemData;
 
-	dao.fe = *pFormatEtc;
+	itemData.format = *format;
 
-	if (fRelease)
+	if (release)
 	{
-		dao.stg = *pMedium;
+		itemData.stg.reset(*stg);
 	}
 	else
 	{
-		BOOL bRet = DuplicateStorageMedium(&dao.stg, pMedium, pFormatEtc);
-
-		if (!bRet)
-		{
-			return E_OUTOFMEMORY;
-		}
+		itemData.stg = DuplicateStorageMedium(stg, format);
 	}
 
-	m_daoList.push_back(dao);
+	m_items.push_back(std::move(itemData));
 
 	return S_OK;
 }
 
-IFACEMETHODIMP DataObjectImpl::EnumFormatEtc(DWORD dwDirection, IEnumFORMATETC **ppEnumFormatEtc)
+IFACEMETHODIMP DataObjectImpl::EnumFormatEtc(DWORD direction, IEnumFORMATETC **enumFormatEtc)
 {
-	if (ppEnumFormatEtc == nullptr)
+	if (enumFormatEtc == nullptr)
 	{
 		return E_INVALIDARG;
 	}
 
-	if (dwDirection == DATADIR_GET)
+	if (direction == DATADIR_GET)
 	{
 		std::list<FORMATETC> feList;
 
-		for (const auto &dao : m_daoList)
+		for (const auto &item : m_items)
 		{
-			feList.push_back(dao.fe);
+			feList.push_back(item.format);
 		}
 
 		auto enumFormatEtcImpl = winrt::make_self<EnumFormatEtcImpl>(feList);
-		*ppEnumFormatEtc = enumFormatEtcImpl.detach();
+		*enumFormatEtc = enumFormatEtcImpl.detach();
 
 		return S_OK;
 	}
@@ -235,27 +179,27 @@ IFACEMETHODIMP DataObjectImpl::EnumFormatEtc(DWORD dwDirection, IEnumFORMATETC *
 	return E_NOTIMPL;
 }
 
-IFACEMETHODIMP DataObjectImpl::DAdvise(FORMATETC *pFormatEtc, DWORD advf, IAdviseSink *pAdvSink,
-	DWORD *pdwConnection)
+IFACEMETHODIMP DataObjectImpl::DAdvise(FORMATETC *format, DWORD flags, IAdviseSink *sink,
+	DWORD *connection)
 {
-	UNREFERENCED_PARAMETER(pFormatEtc);
-	UNREFERENCED_PARAMETER(advf);
-	UNREFERENCED_PARAMETER(pAdvSink);
-	UNREFERENCED_PARAMETER(pdwConnection);
+	UNREFERENCED_PARAMETER(format);
+	UNREFERENCED_PARAMETER(flags);
+	UNREFERENCED_PARAMETER(sink);
+	UNREFERENCED_PARAMETER(connection);
 
 	return E_NOTIMPL;
 }
 
-IFACEMETHODIMP DataObjectImpl::DUnadvise(DWORD dwConnection)
+IFACEMETHODIMP DataObjectImpl::DUnadvise(DWORD connection)
 {
-	UNREFERENCED_PARAMETER(dwConnection);
+	UNREFERENCED_PARAMETER(connection);
 
 	return OLE_E_ADVISENOTSUPPORTED;
 }
 
-IFACEMETHODIMP DataObjectImpl::EnumDAdvise(IEnumSTATDATA **ppenumAdvise)
+IFACEMETHODIMP DataObjectImpl::EnumDAdvise(IEnumSTATDATA **enumAdvise)
 {
-	UNREFERENCED_PARAMETER(ppenumAdvise);
+	UNREFERENCED_PARAMETER(enumAdvise);
 
 	return OLE_E_ADVISENOTSUPPORTED;
 }
@@ -263,42 +207,42 @@ IFACEMETHODIMP DataObjectImpl::EnumDAdvise(IEnumSTATDATA **ppenumAdvise)
 // IDataObjectAsyncCapability
 // End operation does not seem to be called when dropping the CF_HDROP format into Windows Explorer.
 // See: http://us.generation-nt.com/iasyncoperation-idataobject-help-45020022.html
-IFACEMETHODIMP DataObjectImpl::EndOperation(HRESULT hResult, IBindCtx *pbcReserved, DWORD dwEffects)
+IFACEMETHODIMP DataObjectImpl::EndOperation(HRESULT result, IBindCtx *reserved, DWORD effects)
 {
-	UNREFERENCED_PARAMETER(hResult);
-	UNREFERENCED_PARAMETER(pbcReserved);
-	UNREFERENCED_PARAMETER(dwEffects);
+	UNREFERENCED_PARAMETER(result);
+	UNREFERENCED_PARAMETER(reserved);
+	UNREFERENCED_PARAMETER(effects);
 
-	m_bInOperation = FALSE;
+	m_inOperation = false;
 	return S_OK;
 }
 
-IFACEMETHODIMP DataObjectImpl::GetAsyncMode(BOOL *pfIsOpAsync)
+IFACEMETHODIMP DataObjectImpl::GetAsyncMode(BOOL *isAsync)
 {
-	*pfIsOpAsync = m_bDoOpAsync;
-
-	return S_OK;
-}
-
-IFACEMETHODIMP DataObjectImpl::InOperation(BOOL *pfInAsyncOp)
-{
-	*pfInAsyncOp = m_bInOperation;
+	*isAsync = m_doOpAsync ? VARIANT_TRUE : VARIANT_FALSE;
 
 	return S_OK;
 }
 
-IFACEMETHODIMP DataObjectImpl::SetAsyncMode(BOOL fDoOpAsync)
+IFACEMETHODIMP DataObjectImpl::InOperation(BOOL *inAsyncOp)
 {
-	m_bDoOpAsync = fDoOpAsync;
+	*inAsyncOp = m_inOperation ? VARIANT_TRUE : VARIANT_FALSE;
 
 	return S_OK;
 }
 
-IFACEMETHODIMP DataObjectImpl::StartOperation(IBindCtx *pbcReserved)
+IFACEMETHODIMP DataObjectImpl::SetAsyncMode(BOOL doOpAsync)
 {
-	UNREFERENCED_PARAMETER(pbcReserved);
+	m_doOpAsync = !!doOpAsync;
 
-	m_bInOperation = TRUE;
+	return S_OK;
+}
+
+IFACEMETHODIMP DataObjectImpl::StartOperation(IBindCtx *reserved)
+{
+	UNREFERENCED_PARAMETER(reserved);
+
+	m_inOperation = true;
 
 	return S_OK;
 }

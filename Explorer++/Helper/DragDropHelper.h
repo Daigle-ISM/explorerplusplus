@@ -5,35 +5,69 @@
 #pragma once
 
 #include "DataExchangeHelper.h"
+#include "PidlHelper.h"
+#include "UniqueVariableSizeStruct.h"
 #include <wil/result.h>
 #include <ShlObj.h>
 #include <shtypes.h>
 
-STGMEDIUM GetStgMediumForGlobal(HGLOBAL global);
+wil::unique_stg_medium GetStgMediumForGlobal(wil::unique_hglobal global);
 HRESULT SetPreferredDropEffect(IDataObject *dataObject, DWORD effect);
-HRESULT CreateDataObjectForShellTransfer(const std::vector<PCIDLIST_ABSOLUTE> &items,
-	IDataObject **dataObjectOut);
+HRESULT GetPreferredDropEffect(IDataObject *dataObject, DWORD &effect);
 HRESULT SetDropDescription(IDataObject *dataObject, DROPIMAGETYPE type, const std::wstring &message,
 	const std::wstring &insert);
+HRESULT ClearDropDescription(IDataObject *dataObject);
+HRESULT CreateDataObjectForShellTransfer(const std::vector<PidlAbsolute> &items,
+	IDataObject **dataObjectOut);
+HRESULT CreateDataObjectForShellTransfer(const std::vector<PCIDLIST_ABSOLUTE> &items,
+	IDataObject **dataObjectOut);
+HRESULT SetBlobData(IDataObject *dataObject, CLIPFORMAT format, const void *data, size_t size);
+HRESULT SetBlobData(IDataObject *dataObject, FORMATETC *ftc, const void *data, size_t size);
+HRESULT GetBlobData(IDataObject *dataObject, CLIPFORMAT format, std::string &outputData);
+HRESULT GetBlobData(IDataObject *dataObject, FORMATETC *ftc, std::string &outputData);
 
 template <typename T>
+	requires std::is_trivially_copyable_v<T> && std::is_trivially_constructible_v<T>
 HRESULT SetBlobData(IDataObject *dataObject, CLIPFORMAT format, const T &data)
 {
-	FORMATETC ftc = { format, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+	return SetBlobData(dataObject, format, &data, sizeof(data));
+}
 
-	auto global = WriteDataToGlobal(&data, sizeof(data));
+template <typename T>
+	requires std::is_trivially_copyable_v<T> && std::is_trivially_constructible_v<T>
+HRESULT GetBlobData(IDataObject *dataObject, CLIPFORMAT format, T &outputData)
+{
+	std::string binaryData;
+	RETURN_IF_FAILED(GetBlobData(dataObject, format, binaryData));
 
-	if (!global)
+	// The size of the data that's retrieved is determined by GlobalSize(). As indicated by the
+	// documentation for that function, the returned size can be larger than the size requested when
+	// the memory was allocated. If the size is smaller than the size of the target type, however,
+	// something has gone wrong and it doesn't make sense to try and use the data.
+	if (binaryData.size() < sizeof(T))
 	{
 		return E_FAIL;
 	}
 
-	STGMEDIUM stg = GetStgMediumForGlobal(global.get());
-	RETURN_IF_FAILED(dataObject->SetData(&ftc, &stg, TRUE));
+	std::memcpy(&outputData, binaryData.data(), sizeof(T));
 
-	// The IDataObject instance has taken ownership of stg at this point, so it's responsible for
-	// freeing the data.
-	global.release();
+	return S_OK;
+}
+
+template <typename T>
+HRESULT GetBlobData(IDataObject *dataObject, CLIPFORMAT format,
+	UniqueVariableSizeStruct<T> &outputData)
+{
+	std::string binaryData;
+	RETURN_IF_FAILED(GetBlobData(dataObject, format, binaryData));
+
+	if (binaryData.size() < sizeof(T))
+	{
+		return E_FAIL;
+	}
+
+	outputData = MakeUniqueVariableSizeStruct<T>(binaryData.size());
+	std::memcpy(outputData.get(), binaryData.data(), binaryData.size());
 
 	return S_OK;
 }

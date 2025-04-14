@@ -34,6 +34,42 @@ std::optional<std::wstring> Clipboard::ReadText()
 	return ReadStringFromGlobal(clipboardData);
 }
 
+std::optional<std::vector<std::wstring>> Clipboard::ReadHDropData()
+{
+	HANDLE clipboardData = GetClipboardData(CF_HDROP);
+
+	if (!clipboardData)
+	{
+		return std::nullopt;
+	}
+
+	return ReadHDropDataFromGlobal(clipboardData);
+}
+
+std::unique_ptr<Gdiplus::Bitmap> Clipboard::ReadPng()
+{
+	HANDLE clipboardData = GetClipboardData(GetPngClipboardFormat());
+
+	if (!clipboardData)
+	{
+		return nullptr;
+	}
+
+	return ReadPngDataFromGlobal(clipboardData);
+}
+
+std::unique_ptr<Gdiplus::Bitmap> Clipboard::ReadDIB()
+{
+	HANDLE clipboardData = GetClipboardData(CF_DIB);
+
+	if (!clipboardData)
+	{
+		return nullptr;
+	}
+
+	return ReadDIBDataFromGlobal(clipboardData);
+}
+
 std::optional<std::string> Clipboard::ReadCustomData(UINT format)
 {
 	HANDLE clipboardData = GetClipboardData(format);
@@ -56,6 +92,42 @@ bool Clipboard::WriteText(const std::wstring &str)
 	}
 
 	return WriteDataToClipboard(CF_UNICODETEXT, std::move(global));
+}
+
+bool Clipboard::WriteHDropData(const std::vector<std::wstring> &paths)
+{
+	auto global = WriteHDropDataToGlobal(paths);
+
+	if (!global)
+	{
+		return false;
+	}
+
+	return WriteDataToClipboard(CF_HDROP, std::move(global));
+}
+
+bool Clipboard::WritePng(Gdiplus::Bitmap *bitmap)
+{
+	auto global = WritePngDataToGlobal(bitmap);
+
+	if (!global)
+	{
+		return false;
+	}
+
+	return WriteDataToClipboard(GetPngClipboardFormat(), std::move(global));
+}
+
+bool Clipboard::WriteDIB(Gdiplus::Bitmap *bitmap)
+{
+	auto global = WriteDIBDataToGlobal(bitmap);
+
+	if (!global)
+	{
+		return false;
+	}
+
+	return WriteDataToClipboard(CF_DIB, std::move(global));
 }
 
 bool Clipboard::WriteCustomData(UINT format, const std::string &data)

@@ -4,328 +4,265 @@
 
 #include "stdafx.h"
 #include "Explorer++.h"
+#include "App.h"
 #include "Config.h"
+#include "DirectoryOperationsHelper.h"
 #include "MainResource.h"
 #include "ResourceHelper.h"
-#include "ShellBrowser/ShellBrowser.h"
+#include "ShellBrowser/NavigateParams.h"
+#include "ShellBrowser/ShellBrowserImpl.h"
 #include "ShellTreeView/ShellTreeView.h"
 #include "SortMenuBuilder.h"
 #include "Tab.h"
-#include "TabContainer.h"
+#include "TabContainerImpl.h"
 #include "ViewModeHelper.h"
-#include "../Helper/Macros.h"
 #include "../Helper/MenuHelper.h"
 #include "../Helper/ShellHelper.h"
 
-#define MENU_OPEN_IN_NEW_TAB (MAX_SHELL_MENU_ID + 1)
-
-void Explorerplusplus::UpdateMenuEntries(PCIDLIST_ABSOLUTE pidlParent,
-	const std::vector<PITEMID_CHILD> &pidlItems, DWORD_PTR dwData, IContextMenu *contextMenu,
-	HMENU hMenu)
+void Explorerplusplus::UpdateMenuEntries(HMENU menu, PCIDLIST_ABSOLUTE pidlParent,
+	const std::vector<PidlChild> &pidlItems, IContextMenu *contextMenu)
 {
-	assert(dwData != NULL);
-
 	if (pidlItems.empty())
 	{
-		UpdateBackgroundContextMenu(contextMenu, hMenu);
+		UpdateBackgroundContextMenu(menu, pidlParent, contextMenu);
 	}
 	else
 	{
-		UpdateItemContextMenu(pidlParent, pidlItems, dwData, hMenu);
+		UpdateItemContextMenu(menu, pidlParent, pidlItems);
 	}
 }
 
-void Explorerplusplus::UpdateBackgroundContextMenu(IContextMenu *contextMenu, HMENU menu)
+void Explorerplusplus::UpdateBackgroundContextMenu(HMENU menu, PCIDLIST_ABSOLUTE folderPidl,
+	IContextMenu *contextMenu)
+{
+	RemoveNonFunctionalItemsFromBackgroundContextMenu(menu, contextMenu);
+
+	UINT position = 0;
+
+	auto viewsMenu = BuildViewsMenu();
+	std::wstring text =
+		ResourceHelper::LoadString(m_app->GetResourceInstance(), IDS_BACKGROUND_CONTEXT_MENU_VIEW);
+	MenuHelper::AddSubMenuItem(menu, 0, text, std::move(viewsMenu), position++, true);
+
+	SortMenuBuilder sortMenuBuilder(m_app->GetResourceInstance());
+	auto sortMenus =
+		sortMenuBuilder.BuildMenus(GetActivePane()->GetTabContainerImpl()->GetSelectedTab());
+	text = ResourceHelper::LoadString(m_app->GetResourceInstance(),
+		IDS_BACKGROUND_CONTEXT_MENU_SORT_BY);
+	MenuHelper::AddSubMenuItem(menu, 0, text, std::move(sortMenus.sortByMenu), position++, true);
+
+	text = ResourceHelper::LoadString(m_app->GetResourceInstance(),
+		IDS_BACKGROUND_CONTEXT_MENU_GROUP_BY);
+	MenuHelper::AddSubMenuItem(menu, 0, text, std::move(sortMenus.groupByMenu), position++, true);
+
+	text = ResourceHelper::LoadString(m_app->GetResourceInstance(),
+		IDS_BACKGROUND_CONTEXT_MENU_REFRESH);
+	MenuHelper::AddStringItem(menu, IDM_BACKGROUND_CONTEXT_MENU_REFRESH, text, position++, true);
+
+	MenuHelper::AddSeparator(menu, position++, true);
+
+	if (CanCustomizeDirectory(folderPidl))
+	{
+		text = ResourceHelper::LoadString(m_app->GetResourceInstance(),
+			IDS_BACKGROUND_CONTEXT_MENU_CUSTOMIZE);
+		MenuHelper::AddStringItem(menu, IDM_BACKGROUND_CONTEXT_MENU_CUSTOMIZE, text, position++,
+			true);
+		MenuHelper::AddSeparator(menu, position++, true);
+	}
+
+	text =
+		ResourceHelper::LoadString(m_app->GetResourceInstance(), IDS_BACKGROUND_CONTEXT_MENU_PASTE);
+	MenuHelper::AddStringItem(menu, IDM_BACKGROUND_CONTEXT_MENU_PASTE, text, position++, true);
+
+	if (!CanPasteInDirectory(folderPidl, PasteType::Normal))
+	{
+		MenuHelper::EnableItem(menu, IDM_BACKGROUND_CONTEXT_MENU_PASTE, false);
+	}
+
+	text = ResourceHelper::LoadString(m_app->GetResourceInstance(),
+		IDS_BACKGROUND_CONTEXT_MENU_PASTE_SHORTCUT);
+	MenuHelper::AddStringItem(menu, IDM_BACKGROUND_CONTEXT_MENU_PASTE_SHORTCUT, text, position++,
+		true);
+
+	if (!CanPasteInDirectory(folderPidl, PasteType::Shortcut))
+	{
+		MenuHelper::EnableItem(menu, IDM_BACKGROUND_CONTEXT_MENU_PASTE_SHORTCUT, false);
+	}
+
+	MenuHelper::AddSeparator(menu, position++, true);
+}
+
+void Explorerplusplus::RemoveNonFunctionalItemsFromBackgroundContextMenu(HMENU menu,
+	IContextMenu *contextMenu)
 {
 	int numItems = GetMenuItemCount(menu);
 
 	if (numItems == -1)
 	{
+		DCHECK(false);
 		return;
 	}
 
 	for (int i = numItems - 1; i >= 0; i--)
 	{
-		MENUITEMINFO mii = {};
-		mii.cbSize = sizeof(mii);
-		mii.fMask = MIIM_ID | MIIM_FTYPE;
-		BOOL res = GetMenuItemInfo(menu, i, TRUE, &mii);
+		MENUITEMINFO menuItemInfo = {};
+		menuItemInfo.cbSize = sizeof(menuItemInfo);
+		menuItemInfo.fMask = MIIM_ID | MIIM_FTYPE;
+		BOOL res = GetMenuItemInfo(menu, i, TRUE, &menuItemInfo);
 
-		if (!res || WI_IsFlagSet(mii.fType, MFT_SEPARATOR) || mii.wID < MIN_SHELL_MENU_ID
-			|| mii.wID > MAX_SHELL_MENU_ID)
+		if (!res || WI_IsFlagSet(menuItemInfo.fType, MFT_SEPARATOR)
+			|| menuItemInfo.wID < ShellContextMenu::MIN_SHELL_MENU_ID
+			|| menuItemInfo.wID > ShellContextMenu::MAX_SHELL_MENU_ID)
 		{
 			continue;
 		}
 
-		// Note that verbs are only present for the majority of system items in the background
-		// context menu starting in Windows 8. In Windows 7, verbs are only set for a couple of
-		// items. Therefore, the code below isn't going to work on anything earlier then Windows 8.
 		TCHAR verb[64] = _T("");
-		HRESULT hr = contextMenu->GetCommandString(mii.wID - MIN_SHELL_MENU_ID, GCS_VERB, nullptr,
-			reinterpret_cast<LPSTR>(verb), SIZEOF_ARRAY(verb));
+		HRESULT hr = contextMenu->GetCommandString(menuItemInfo.wID
+				- ShellContextMenu::MIN_SHELL_MENU_ID,
+			GCS_VERB, nullptr, reinterpret_cast<LPSTR>(verb), static_cast<UINT>(std::size(verb)));
 
 		if (FAILED(hr))
 		{
 			continue;
 		}
 
-		// TODO: Library folders have an "Arrange by" menu that appears at the top of the background
-		// context menu. That menu should be removed, if there's a reliable way of doing it (the
-		// menu item doesn't have a verb at present).
-
-		if (StrCmpI(verb, L"view") == 0)
+		if (StrCmpI(verb, L"savesearch") == 0)
 		{
-			DeleteMenu(menu, i, MF_BYPOSITION);
-
-			auto viewsMenu = BuildViewsMenu();
-			std::wstring text =
-				ResourceHelper::LoadString(m_resourceInstance, IDS_BACKGROUND_CONTEXT_MENU_VIEW);
-			MenuHelper::AddSubMenuItem(menu, text, std::move(viewsMenu), i, TRUE);
-		}
-		else if (StrCmpI(verb, L"arrange") == 0)
-		{
-			DeleteMenu(menu, i, MF_BYPOSITION);
-
-			SortMenuBuilder sortMenuBuilder(m_resourceInstance);
-			auto sortMenus =
-				sortMenuBuilder.BuildMenus(GetActivePane()->GetTabContainer()->GetSelectedTab());
-
-			std::wstring text =
-				ResourceHelper::LoadString(m_resourceInstance, IDS_BACKGROUND_CONTEXT_MENU_SORT_BY);
-			MenuHelper::AddSubMenuItem(menu, text, std::move(sortMenus.sortByMenu), i, TRUE);
-		}
-		else if (StrCmpI(verb, L"groupby") == 0)
-		{
-			DeleteMenu(menu, i, MF_BYPOSITION);
-
-			SortMenuBuilder sortMenuBuilder(m_resourceInstance);
-			auto sortMenus =
-				sortMenuBuilder.BuildMenus(GetActivePane()->GetTabContainer()->GetSelectedTab());
-
-			std::wstring text = ResourceHelper::LoadString(m_resourceInstance,
-				IDS_BACKGROUND_CONTEXT_MENU_GROUP_BY);
-			MenuHelper::AddSubMenuItem(menu, text, std::move(sortMenus.groupByMenu), i, TRUE);
-		}
-		else if (StrCmpI(verb, L"paste") == 0)
-		{
-			UINT flags = MF_BYPOSITION;
-
-			if (CanPaste())
-			{
-				flags |= MF_ENABLED;
-			}
-			else
-			{
-				flags |= MF_DISABLED;
-			}
-
-			EnableMenuItem(menu, i, flags);
-		}
-		else if (StrCmpI(verb, L"pastelink") == 0)
-		{
-			UINT flags = MF_BYPOSITION;
-
-			if (CanPasteShortcut())
-			{
-				flags |= MF_ENABLED;
-			}
-			else
-			{
-				flags |= MF_DISABLED;
-			}
-
-			EnableMenuItem(menu, i, flags);
-		}
-		else if (StrCmpI(verb, L"undo") == 0 || StrCmpI(verb, L"redo") == 0)
-		{
-			// Most context menu items are handled via IContextMenu::InvokeCommand(). However, some
-			// items can't be handled that way. For example, the rename item needs to be handled by
-			// the view, since the view is what's responsible for putting items into rename mode.
-			// Therefore, the context menu handler that the shell constructs will call SendMessage()
-			// to notify the view when certain items are selected. Undo + redo are two items that
-			// are handled by the view, which is why they don't work when the parent menu is hosted
-			// in Explorer++ and why they're removed here.
+			// This menu item appears on the background context menu for a search results folder.
+			// When it's clicked, the shell will request view information, using IFolderView2, along
+			// with at least one undocumented interface. Because attempting to implement an
+			// undocumented interface is potentially difficult and carries risk, along with the fact
+			// that the view information in Explorer++ doesn't correspond precisely with the view
+			// information in Explorer anyway, this item is removed here.
 			DeleteMenu(menu, i, MF_BYPOSITION);
 		}
 	}
 }
 
-void Explorerplusplus::UpdateItemContextMenu(PCIDLIST_ABSOLUTE pidlParent,
-	const std::vector<PITEMID_CHILD> &pidlItems, DWORD_PTR data, HMENU menu)
+void Explorerplusplus::UpdateItemContextMenu(HMENU menu, PCIDLIST_ABSOLUTE pidlParent,
+	const std::vector<PidlChild> &pidlItems)
 {
-	auto *pfcmi = reinterpret_cast<FileContextMenuInfo *>(data);
-
 	bool addNewTabMenuItem = false;
 
-	if (pfcmi->uFrom == FROM_LISTVIEW)
+	if (pidlItems.size() == 1)
 	{
-		if (pidlItems.size() == 1)
+		SFGAOF fileAttributes = SFGAO_FOLDER;
+
+		unique_pidl_absolute pidlComplete(ILCombine(pidlParent, pidlItems[0].Raw()));
+		GetItemAttributes(pidlComplete.get(), &fileAttributes);
+
+		if (fileAttributes & SFGAO_FOLDER)
 		{
-			SFGAOF fileAttributes = SFGAO_FOLDER;
-
-			unique_pidl_absolute pidlComplete(ILCombine(pidlParent, pidlItems.front()));
-			GetItemAttributes(pidlComplete.get(), &fileAttributes);
-
-			if (fileAttributes & SFGAO_FOLDER)
-			{
-				addNewTabMenuItem = true;
-			}
+			addNewTabMenuItem = true;
 		}
-	}
-	else if (pfcmi->uFrom == FROM_TREEVIEW)
-	{
-		/* The treeview only contains folders,
-		so the new tab menu item will always
-		be shown. */
-		addNewTabMenuItem = true;
 	}
 
 	if (addNewTabMenuItem)
 	{
 		std::wstring openInNewTabText =
-			ResourceHelper::LoadString(m_resourceInstance, IDS_GENERAL_OPEN_IN_NEW_TAB);
+			ResourceHelper::LoadString(m_app->GetResourceInstance(), IDS_GENERAL_OPEN_IN_NEW_TAB);
 
 		MENUITEMINFO mii;
 		mii.cbSize = sizeof(mii);
 		mii.fMask = MIIM_STRING | MIIM_ID;
-		mii.wID = MENU_OPEN_IN_NEW_TAB;
+		mii.wID = OPEN_IN_NEW_TAB_MENU_ITEM_ID;
 		mii.dwTypeData = openInNewTabText.data();
 		InsertMenuItem(menu, 1, TRUE, &mii);
 	}
 }
 
-BOOL Explorerplusplus::HandleShellMenuItem(PCIDLIST_ABSOLUTE pidlParent,
-	const std::vector<PITEMID_CHILD> &pidlItems, DWORD_PTR dwData, const TCHAR *szCmd)
+bool Explorerplusplus::HandleShellMenuItem(PCIDLIST_ABSOLUTE pidlParent,
+	const std::vector<PidlChild> &pidlItems, const std::wstring &verb)
 {
-	auto *pfcmi = reinterpret_cast<FileContextMenuInfo *>(dwData);
-
-	if (StrCmpI(szCmd, _T("open")) == 0)
+	if (verb == L"open")
 	{
-		if (pidlItems.empty())
+		for (const auto &pidl : pidlItems)
 		{
-			OpenItem(pidlParent);
-		}
-		else
-		{
-			for (const auto &pidl : pidlItems)
-			{
-				unique_pidl_absolute pidlComplete(ILCombine(pidlParent, pidl));
-				OpenItem(pidlComplete.get());
-			}
+			unique_pidl_absolute pidlComplete(ILCombine(pidlParent, pidl.Raw()));
+			OpenItem(pidlComplete.get());
 		}
 
-		return TRUE;
+		return true;
 	}
-	else if (StrCmpI(szCmd, _T("viewcustomwizard")) == 0)
+	else if (verb == L"rename")
 	{
-		// This item is only shown on the background context menu and that menu can only be shown
-		// within the listview.
-		assert(pfcmi->uFrom == FROM_LISTVIEW);
-		assert(pidlItems.empty());
+		OnFileRename();
 
-		// This verb (which corresponds to the "Customize this folder..." menu item shown in the
-		// background context menu) doesn't appear to be a standard verb that's handled by the
-		// system. Therefore, it will be handled here.
-		return ExecuteFileAction(m_hActiveListView, L"properties", L"customize", nullptr,
-			pidlParent);
+		return true;
 	}
-	else if (StrCmpI(szCmd, _T("refresh")) == 0)
+	else if (verb == L"copy")
 	{
-		OnRefresh();
+		Tab &selectedTab = GetActivePane()->GetTabContainerImpl()->GetSelectedTab();
+		selectedTab.GetShellBrowserImpl()->CopySelectedItemsToClipboard(true);
 
-		return TRUE;
+		return true;
 	}
-	else if (StrCmpI(szCmd, _T("rename")) == 0)
+	else if (verb == L"cut")
 	{
-		if (pfcmi->uFrom == FROM_LISTVIEW)
-		{
-			OnFileRename();
-		}
-		else if (pfcmi->uFrom == FROM_TREEVIEW)
-		{
-			assert(pidlItems.size() == 1);
-			unique_pidl_absolute pidlComplete(ILCombine(pidlParent, pidlItems[0]));
-			m_shellTreeView->StartRenamingItem(pidlComplete.get());
-		}
+		Tab &selectedTab = GetActivePane()->GetTabContainerImpl()->GetSelectedTab();
+		selectedTab.GetShellBrowserImpl()->CopySelectedItemsToClipboard(false);
 
-		return TRUE;
-	}
-	else if (StrCmpI(szCmd, _T("copy")) == 0)
-	{
-		if (pfcmi->uFrom == FROM_LISTVIEW)
-		{
-			Tab &selectedTab = GetActivePane()->GetTabContainer()->GetSelectedTab();
-			selectedTab.GetShellBrowser()->CopySelectedItemsToClipboard(true);
-		}
-		else if (pfcmi->uFrom == FROM_TREEVIEW)
-		{
-			assert(pidlItems.size() == 1);
-			unique_pidl_absolute pidlComplete(ILCombine(pidlParent, pidlItems[0]));
-			m_shellTreeView->CopyItemToClipboard(pidlComplete.get(), true);
-		}
-
-		return TRUE;
-	}
-	else if (StrCmpI(szCmd, _T("cut")) == 0)
-	{
-		if (pfcmi->uFrom == FROM_LISTVIEW)
-		{
-			Tab &selectedTab = GetActivePane()->GetTabContainer()->GetSelectedTab();
-			selectedTab.GetShellBrowser()->CopySelectedItemsToClipboard(false);
-		}
-		else if (pfcmi->uFrom == FROM_TREEVIEW)
-		{
-			assert(pidlItems.size() == 1);
-			unique_pidl_absolute pidlComplete(ILCombine(pidlParent, pidlItems[0]));
-			m_shellTreeView->CopyItemToClipboard(pidlComplete.get(), false);
-		}
-
-		return TRUE;
-	}
-	else if (StrCmpI(szCmd, _T("paste")) == 0)
-	{
-		if (pfcmi->uFrom == FROM_LISTVIEW && pidlItems.empty())
-		{
-			// The paste item on the background context menu is non-functional, so needs to be
-			// handled here.
-			OnListViewPaste();
-			return TRUE;
-		}
-	}
-	else if (StrCmpI(szCmd, _T("pastelink")) == 0)
-	{
-		// This item should only be shown in the background context menu.
-		assert(pfcmi->uFrom == FROM_LISTVIEW);
-		assert(pidlItems.empty());
-
-		GetActiveShellBrowser()->PasteShortcut();
-
-		return TRUE;
+		return true;
 	}
 
-	return FALSE;
+	return false;
 }
 
 void Explorerplusplus::HandleCustomMenuItem(PCIDLIST_ABSOLUTE pidlParent,
-	const std::vector<PITEMID_CHILD> &pidlItems, int iCmd)
+	const std::vector<PidlChild> &pidlItems, UINT menuItemId)
 {
-	switch (iCmd)
+	switch (menuItemId)
 	{
-	case MENU_OPEN_IN_NEW_TAB:
+	case OPEN_IN_NEW_TAB_MENU_ITEM_ID:
 	{
 		// This menu item should only be added when a single folder is selected.
-		assert(pidlItems.size() == 1);
+		DCHECK_EQ(pidlItems.size(), 1u);
 
-		unique_pidl_absolute pidlComplete(ILCombine(pidlParent, pidlItems[0]));
+		unique_pidl_absolute pidlComplete(ILCombine(pidlParent, pidlItems[0].Raw()));
 		auto navigateParams = NavigateParams::Normal(pidlComplete.get());
-		GetActivePane()->GetTabContainer()->CreateNewTab(navigateParams,
+		GetActivePane()->GetTabContainerImpl()->CreateNewTab(navigateParams,
 			TabSettings(_selected = m_config->openTabsInForeground));
 	}
 	break;
 
 	// Custom items in the background context menu will be handled by the WM_COMMAND handler.
 	default:
-		SendMessage(m_hContainer, WM_COMMAND, MAKEWPARAM(iCmd, 0), 0);
+		SendMessage(m_hContainer, WM_COMMAND, MAKEWPARAM(menuItemId, 0), 0);
 		break;
 	}
+}
+
+std::wstring Explorerplusplus::GetHelpTextForItem(UINT menuItemId)
+{
+	// By default, the help text will be looked up via the menu item ID.
+	UINT menuHelpTextId = menuItemId;
+
+	switch (menuItemId)
+	{
+	case OPEN_IN_NEW_TAB_MENU_ITEM_ID:
+		menuHelpTextId = IDS_GENERAL_OPEN_IN_NEW_TAB_HELP_TEXT;
+		break;
+
+	case IDM_BACKGROUND_CONTEXT_MENU_REFRESH:
+		menuHelpTextId = IDM_VIEW_REFRESH;
+		break;
+
+	case IDM_BACKGROUND_CONTEXT_MENU_PASTE:
+		menuHelpTextId = IDM_EDIT_PASTE;
+		break;
+
+	case IDM_BACKGROUND_CONTEXT_MENU_PASTE_SHORTCUT:
+		menuHelpTextId = IDM_EDIT_PASTESHORTCUT;
+		break;
+	}
+
+	auto helpText = ResourceHelper::MaybeLoadString(m_app->GetResourceInstance(), menuHelpTextId);
+
+	if (helpText)
+	{
+		return *helpText;
+	}
+
+	return L"";
 }

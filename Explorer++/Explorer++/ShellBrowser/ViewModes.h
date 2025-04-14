@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "BetterEnumsWrapper.h"
+#include "../Helper/BetterEnumsWrapper.h"
 
 // clang-format off
 BETTER_ENUM(ViewMode, int,
@@ -15,9 +15,13 @@ BETTER_ENUM(ViewMode, int,
 	Tiles = 5,
 	Thumbnails = 6,
 	ExtraLargeIcons = 7,
-	LargeIcons = 8
+	LargeIcons = 8,
+	ExtraLargeThumbnails = 9,
+	LargeThumbnails = 10
 )
 // clang-format on
+
+bool IsThumbnailsViewMode(ViewMode viewMode);
 
 UINT GetViewModeMenuId(ViewMode viewMode);
 std::wstring GetViewModeMenuText(ViewMode viewMode, HINSTANCE resourceInstance);

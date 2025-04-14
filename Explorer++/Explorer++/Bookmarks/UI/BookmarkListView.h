@@ -10,16 +10,18 @@
 #include "Bookmarks/UI/BookmarkContextMenu.h"
 #include "Bookmarks/UI/BookmarkDropTargetWindow.h"
 #include "ResourceHelper.h"
-#include "../Helper/WindowSubclassWrapper.h"
+#include "../Helper/WindowSubclass.h"
 #include <boost/signals2.hpp>
 #include <wil/resource.h>
 #include <optional>
 
 class BookmarkIconManager;
 class BookmarkTree;
+class BrowserWindow;
 class CoreInterface;
 class IconFetcher;
-class Navigator;
+class IconResourceLoader;
+class ThemeManager;
 
 class BookmarkListView : public BookmarkNavigatorInterface, private BookmarkDropTargetWindow
 {
@@ -32,10 +34,12 @@ public:
 	};
 
 	BookmarkListView(HWND hListView, HINSTANCE resourceInstance, BookmarkTree *bookmarkTree,
-		CoreInterface *coreInterface, Navigator *navigator, IconFetcher *iconFetcher,
-		const std::vector<Column> &initialColumns);
+		BrowserWindow *browserWindow, CoreInterface *coreInterface,
+		const IconResourceLoader *iconResourceLoader, IconFetcher *iconFetcher,
+		ThemeManager *themeManager, const std::vector<Column> &initialColumns);
 
-	void NavigateToBookmarkFolder(BookmarkItem *bookmarkFolder, bool addHistoryEntry) override;
+	void NavigateToBookmarkFolder(BookmarkItem *bookmarkFolder,
+		const BookmarkHistoryEntry *entry = nullptr) override;
 	boost::signals2::connection AddNavigationCompletedObserver(
 		const BookmarkNavigationCompletedSignal::slot_type &observer,
 		boost::signals2::connect_position position = boost::signals2::at_back) override;
@@ -128,13 +132,15 @@ private:
 
 	HWND m_hListView;
 	HINSTANCE m_resourceInstance;
-	CoreInterface *m_coreInterface;
-	Navigator *m_navigator;
+	BookmarkTree *m_bookmarkTree = nullptr;
+	BrowserWindow *m_browserWindow = nullptr;
+	CoreInterface *m_coreInterface = nullptr;
+	const IconResourceLoader *const m_iconResourceLoader;
+	ThemeManager *const m_themeManager;
 	std::unique_ptr<BookmarkIconManager> m_bookmarkIconManager;
 	std::vector<Column> m_columns;
 
-	BookmarkTree *m_bookmarkTree;
-	BookmarkItem *m_currentBookmarkFolder;
+	BookmarkItem *m_currentBookmarkFolder = nullptr;
 	BookmarkHelper::ColumnType m_sortColumn;
 	bool m_sortAscending;
 	std::optional<BookmarkHelper::ColumnType> m_previousSortColumn;
@@ -144,6 +150,6 @@ private:
 
 	std::optional<int> m_previousDropItem;
 
-	std::vector<std::unique_ptr<WindowSubclassWrapper>> m_windowSubclasses;
+	std::vector<std::unique_ptr<WindowSubclass>> m_windowSubclasses;
 	std::vector<boost::signals2::scoped_connection> m_connections;
 };

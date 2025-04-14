@@ -25,11 +25,9 @@ public:
 	void InitializeDialog();
 	HWND GetDialog() const;
 	std::wstring GetTitle() const;
+	bool DoesPageContainText(const std::wstring &text, StringComparatorFunc stringComparator);
 
 	virtual void SaveSettings() = 0;
-
-	virtual bool DoesPageContainText(const std::wstring &text,
-		StringComparatorFunc stringComparator);
 
 protected:
 	Config *const m_config;
@@ -67,8 +65,8 @@ private:
 	virtual INT_PTR DialogProcExtra(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam);
 
 	HWND m_dialog = nullptr;
-	const HWND m_parent;
 	const UINT m_dialogResourceId;
 	const UINT m_titleResourceId;
+	const HWND m_parent;
 	std::unique_ptr<ResizableDialogHelper> m_resizableDialogHelper;
 };

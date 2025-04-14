@@ -4,13 +4,17 @@
 
 #include "stdafx.h"
 #include "Explorer++.h"
+#include "App.h"
 #include "Config.h"
 #include "MainResource.h"
 #include "ResourceHelper.h"
-#include "ShellBrowser/ShellBrowser.h"
-#include "TabContainer.h"
+#include "ShellBrowser/NavigationRequest.h"
+#include "ShellBrowser/ShellBrowserImpl.h"
+#include "TabContainerImpl.h"
 #include "../Helper/Controls.h"
 #include "../Helper/WindowHelper.h"
+#include <fmt/format.h>
+#include <fmt/xchar.h>
 
 void Explorerplusplus::CreateStatusBar()
 {
@@ -24,19 +28,12 @@ void Explorerplusplus::CreateStatusBar()
 	m_hStatusBar = ::CreateStatusBar(m_hContainer, style);
 	m_pStatusBar = new StatusBar(m_hStatusBar);
 
-	int width = 0;
+	m_windowSubclasses.push_back(std::make_unique<WindowSubclass>(m_hStatusBar,
+		std::bind_front(&Explorerplusplus::StatusBarSubclass, this)));
 
-	RECT rc;
-	BOOL res = GetWindowRect(m_hContainer, &rc);
+	SetStatusBarParts();
 
-	if (res)
-	{
-		width = GetRectWidth(&rc);
-	}
-
-	SetStatusBarParts(width);
-
-	m_statusBarFontSetter = std::make_unique<MainFontSetter>(m_hStatusBar, m_config.get());
+	m_statusBarFontSetter = std::make_unique<MainFontSetter>(m_hStatusBar, m_config);
 	m_statusBarFontSetter->fontUpdatedSignal.AddObserver([this]() { UpdateStatusBarMinHeight(); });
 
 	// Even if the status bar uses the default font, the height won't necessarily be correct. As
@@ -46,15 +43,30 @@ void Explorerplusplus::CreateStatusBar()
 	UpdateStatusBarMinHeight();
 }
 
-void Explorerplusplus::SetStatusBarParts(int width)
+LRESULT Explorerplusplus::StatusBarSubclass(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-	int parts[3];
+	switch (msg)
+	{
+	case WM_SIZE:
+		SetStatusBarParts();
+		break;
+	}
 
-	parts[0] = (int) (0.50 * width);
-	parts[1] = (int) (0.75 * width);
-	parts[2] = width;
+	return DefSubclassProc(hwnd, msg, wParam, lParam);
+}
 
-	SendMessage(m_hStatusBar, SB_SETPARTS, 3, (LPARAM) parts);
+void Explorerplusplus::SetStatusBarParts()
+{
+	RECT clientRect;
+	BOOL res = GetClientRect(m_hStatusBar, &clientRect);
+	CHECK(res);
+
+	int width = GetRectWidth(&clientRect);
+
+	int parts[] = { static_cast<int>(0.50 * width), static_cast<int>(0.75 * width), -1 };
+	auto setPartsRes =
+		SendMessage(m_hStatusBar, SB_SETPARTS, std::size(parts), reinterpret_cast<LPARAM>(parts));
+	DCHECK(setPartsRes);
 }
 
 // This function should be called whenever the font is updated for the status bar control.
@@ -112,16 +124,17 @@ LRESULT Explorerplusplus::StatusBarMenuSelect(WPARAM wParam, LPARAM lParam)
 
 		std::optional<std::wstring> helperText;
 
-		if (WI_IsFlagClear(HIWORD(wParam), MF_POPUP))
+		if (WI_AreAllFlagsClear(HIWORD(wParam), MF_POPUP | MF_SEPARATOR))
 		{
 			HMENU menu = reinterpret_cast<HMENU>(lParam);
-			int menuItemId = LOWORD(wParam);
+			UINT menuItemId = LOWORD(wParam);
 
 			helperText = m_getMenuItemHelperTextSignal(menu, menuItemId);
 
 			if (!helperText)
 			{
-				helperText = ResourceHelper::MaybeLoadString(m_resourceInstance, menuItemId);
+				helperText =
+					ResourceHelper::MaybeLoadString(m_app->GetResourceInstance(), menuItemId);
 			}
 		}
 
@@ -138,12 +151,13 @@ LRESULT Explorerplusplus::StatusBarMenuSelect(WPARAM wParam, LPARAM lParam)
 	return 0;
 }
 
-void Explorerplusplus::OnNavigationStartedStatusBar(const Tab &tab,
-	const NavigateParams &navigateParams)
+void Explorerplusplus::OnNavigationStartedStatusBar(const NavigationRequest *request)
 {
-	if (GetActivePane()->GetTabContainer()->IsTabSelected(tab))
+	const auto *tab = request->GetShellBrowser()->GetTab();
+
+	if (GetActivePane()->GetTabContainerImpl()->IsTabSelected(*tab))
 	{
-		SetStatusBarLoadingText(navigateParams.pidl.Raw());
+		UpdateStatusBarText(*tab);
 	}
 }
 
@@ -157,45 +171,63 @@ void Explorerplusplus::SetStatusBarLoadingText(PCIDLIST_ABSOLUTE pidl)
 		return;
 	}
 
-	TCHAR szTemp[64];
-	TCHAR szLoadingText[512];
-	LoadString(m_resourceInstance, IDS_GENERAL_LOADING, szTemp, SIZEOF_ARRAY(szTemp));
-	StringCchPrintf(szLoadingText, SIZEOF_ARRAY(szLoadingText), szTemp, displayName.c_str());
+	std::wstring loadingTemplate =
+		ResourceHelper::LoadString(m_app->GetResourceInstance(), IDS_GENERAL_LOADING);
+	std::wstring loadingText =
+		fmt::format(fmt::runtime(loadingTemplate), fmt::arg(L"folder_name", displayName));
 
 	/* Browsing of a folder has started. Set the status bar text to indicate that
 	the folder is being loaded. */
-	SendMessage(m_hStatusBar, SB_SETTEXT, 0, (LPARAM) szLoadingText);
+	SendMessage(m_hStatusBar, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(loadingText.c_str()));
 
 	/* Clear the text in all other parts of the status bar. */
-	SendMessage(m_hStatusBar, SB_SETTEXT, 1, (LPARAM) EMPTY_STRING);
-	SendMessage(m_hStatusBar, SB_SETTEXT, 2, (LPARAM) EMPTY_STRING);
+	SendMessage(m_hStatusBar, SB_SETTEXT, 1, reinterpret_cast<LPARAM>(L""));
+	SendMessage(m_hStatusBar, SB_SETTEXT, 2, reinterpret_cast<LPARAM>(L""));
 }
 
-void Explorerplusplus::OnNavigationCompletedStatusBar(const Tab &tab,
-	const NavigateParams &navigateParams)
+void Explorerplusplus::OnNavigationFailedStatusBar(const NavigationRequest *request)
 {
-	UNREFERENCED_PARAMETER(navigateParams);
+	const auto *tab = request->GetShellBrowser()->GetTab();
 
-	if (GetActivePane()->GetTabContainer()->IsTabSelected(tab))
+	if (GetActivePane()->GetTabContainerImpl()->IsTabSelected(*tab))
 	{
-		UpdateStatusBarText(tab);
+		UpdateStatusBarText(*tab);
 	}
 }
 
-void Explorerplusplus::OnNavigationFailedStatusBar(const Tab &tab,
-	const NavigateParams &navigateParams)
+void Explorerplusplus::OnNavigationCancelledStatusBar(const NavigationRequest *request)
 {
-	UNREFERENCED_PARAMETER(navigateParams);
+	const auto *tab = request->GetShellBrowser()->GetTab();
 
-	if (GetActivePane()->GetTabContainer()->IsTabSelected(tab))
+	if (GetActivePane()->GetTabContainerImpl()->IsTabSelected(*tab))
 	{
-		UpdateStatusBarText(tab);
+		UpdateStatusBarText(*tab);
 	}
 }
 
-HRESULT Explorerplusplus::UpdateStatusBarText(const Tab &tab)
+void Explorerplusplus::OnNavigationsStoppedStatusBar(const ShellBrowser *shellBrowser)
 {
-	int numItemsSelected = tab.GetShellBrowser()->GetNumSelected();
+	const auto *tab = shellBrowser->GetTab();
+
+	if (GetActivePane()->GetTabContainerImpl()->IsTabSelected(*tab))
+	{
+		// All pending navigations have been stopped, so it's possible there are no longer any
+		// active navigations, in which case, the status bar text will need to be updated.
+		UpdateStatusBarText(*tab);
+	}
+}
+
+void Explorerplusplus::UpdateStatusBarText(const Tab &tab)
+{
+	if (auto *navigation = tab.GetShellBrowser()->MaybeGetLatestActiveNavigation())
+	{
+		// In this case, there is at least one active navigation in progress, so the status bar
+		// should reflect that.
+		SetStatusBarLoadingText(navigation->GetNavigateParams().pidl.Raw());
+		return;
+	}
+
+	int numItemsSelected = tab.GetShellBrowserImpl()->GetNumSelected();
 	std::wstring numItemsText;
 
 	// The item count that's shown will either be the number of items selected, or the total number
@@ -204,35 +236,37 @@ HRESULT Explorerplusplus::UpdateStatusBarText(const Tab &tab)
 	{
 		if (numItemsSelected == 1)
 		{
-			numItemsText =
-				ResourceHelper::LoadString(m_resourceInstance, IDS_GENERAL_SELECTED_ONE_ITEM);
+			numItemsText = ResourceHelper::LoadString(m_app->GetResourceInstance(),
+				IDS_GENERAL_SELECTED_ONE_ITEM);
 		}
 		else
 		{
-			auto multipleItemsText =
-				ResourceHelper::LoadString(m_resourceInstance, IDS_GENERAL_SELECTED_MULTIPLE_ITEMS);
+			auto multipleItemsText = ResourceHelper::LoadString(m_app->GetResourceInstance(),
+				IDS_GENERAL_SELECTED_MULTIPLE_ITEMS);
 			numItemsText = std::format(L"{:L} {}", numItemsSelected, multipleItemsText);
 		}
 	}
 	else
 	{
-		int numItems = tab.GetShellBrowser()->GetNumItems();
+		int numItems = tab.GetShellBrowserImpl()->GetNumItems();
 
 		if (numItems == 1)
 		{
-			numItemsText = ResourceHelper::LoadString(m_resourceInstance, IDS_GENERAL_ONE_ITEM);
+			numItemsText =
+				ResourceHelper::LoadString(m_app->GetResourceInstance(), IDS_GENERAL_ONE_ITEM);
 		}
 		else
 		{
-			auto multipleItemsText =
-				ResourceHelper::LoadString(m_resourceInstance, IDS_GENERAL_MULTIPLE_ITEMS);
+			auto multipleItemsText = ResourceHelper::LoadString(m_app->GetResourceInstance(),
+				IDS_GENERAL_MULTIPLE_ITEMS);
 			numItemsText = std::format(L"{:L} {}", numItems, multipleItemsText);
 		}
 	}
 
-	if (tab.GetShellBrowser()->IsFilterApplied())
+	if (tab.GetShellBrowserImpl()->IsFilterApplied())
 	{
-		auto filterAppliedText = ResourceHelper::LoadString(m_resourceInstance, IDS_FILTER_APPLIED);
+		auto filterAppliedText =
+			ResourceHelper::LoadString(m_app->GetResourceInstance(), IDS_FILTER_APPLIED);
 		numItemsText += L" | " + filterAppliedText;
 	}
 
@@ -242,31 +276,31 @@ HRESULT Explorerplusplus::UpdateStatusBarText(const Tab &tab)
 
 	if (numItemsSelected == 0)
 	{
-		SizeDisplayFormat displayFormat = m_config->globalFolderSettings.forceSize
+		auto displayFormat = m_config->globalFolderSettings.forceSize
 			? m_config->globalFolderSettings.sizeDisplayFormat
-			: SizeDisplayFormat::None;
-		sizeText = FormatSizeString(tab.GetShellBrowser()->GetTotalDirectorySize(), displayFormat);
+			: +SizeDisplayFormat::None;
+		sizeText =
+			FormatSizeString(tab.GetShellBrowserImpl()->GetTotalDirectorySize(), displayFormat);
 	}
 	else
 	{
 		// Note that no size will be shown if only folders are selected.
-		if (tab.GetShellBrowser()->GetNumSelectedFiles() != 0)
+		if (tab.GetShellBrowserImpl()->GetNumSelectedFiles() != 0)
 		{
-			SizeDisplayFormat displayFormat = m_config->globalFolderSettings.forceSize
+			auto displayFormat = m_config->globalFolderSettings.forceSize
 				? m_config->globalFolderSettings.sizeDisplayFormat
-				: SizeDisplayFormat::None;
-			sizeText = FormatSizeString(tab.GetShellBrowser()->GetSelectionSize(), displayFormat);
+				: +SizeDisplayFormat::None;
+			sizeText =
+				FormatSizeString(tab.GetShellBrowserImpl()->GetSelectionSize(), displayFormat);
 		}
 	}
 
 	SendMessage(m_hStatusBar, SB_SETTEXT, 1, reinterpret_cast<LPARAM>(sizeText.c_str()));
 
 	std::wstring driveFreeSpaceText =
-		CreateDriveFreeSpaceString(tab.GetShellBrowser()->GetDirectory().c_str());
+		CreateDriveFreeSpaceString(tab.GetShellBrowserImpl()->GetDirectory().c_str());
 
 	SendMessage(m_hStatusBar, SB_SETTEXT, 2, reinterpret_cast<LPARAM>(driveFreeSpaceText.c_str()));
-
-	return S_OK;
 }
 
 std::wstring Explorerplusplus::CreateDriveFreeSpaceString(const std::wstring &path)
@@ -282,6 +316,6 @@ std::wstring Explorerplusplus::CreateDriveFreeSpaceString(const std::wstring &pa
 	}
 
 	return std::format(L"{} {} ({:.0Lf}%)", FormatSizeString(totalNumberOfFreeBytes.QuadPart),
-		ResourceHelper::LoadString(m_resourceInstance, IDS_GENERAL_FREE),
+		ResourceHelper::LoadString(m_app->GetResourceInstance(), IDS_GENERAL_FREE),
 		totalNumberOfFreeBytes.QuadPart * 100.0 / totalNumberOfBytes.QuadPart);
 }

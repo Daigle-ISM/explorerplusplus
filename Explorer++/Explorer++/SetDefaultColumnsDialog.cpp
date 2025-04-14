@@ -6,12 +6,12 @@
 #include "SetDefaultColumnsDialog.h"
 #include "MainResource.h"
 #include "ResourceHelper.h"
-#include "ShellBrowser/ShellBrowser.h"
+#include "ShellBrowser/ShellBrowserImpl.h"
 #include "../Helper/ListViewHelper.h"
-#include "../Helper/Macros.h"
 #include "../Helper/RegistrySettings.h"
 #include "../Helper/ShellHelper.h"
 #include "../Helper/XMLSettings.h"
+#include <glog/logging.h>
 #include <algorithm>
 
 const TCHAR SetDefaultColumnsDialogPersistentSettings::SETTINGS_KEY[] = _T("SetDefaultColumns");
@@ -19,8 +19,9 @@ const TCHAR SetDefaultColumnsDialogPersistentSettings::SETTINGS_KEY[] = _T("SetD
 const TCHAR SetDefaultColumnsDialogPersistentSettings::SETTING_FOLDER_TYPE[] = _T("Folder");
 
 SetDefaultColumnsDialog::SetDefaultColumnsDialog(HINSTANCE resourceInstance, HWND hParent,
-	FolderColumns &folderColumns) :
-	ThemedDialog(resourceInstance, IDD_SETDEFAULTCOLUMNS, hParent, DialogSizingType::Both),
+	ThemeManager *themeManager, FolderColumns &folderColumns) :
+	ThemedDialog(resourceInstance, IDD_SETDEFAULTCOLUMNS, hParent, DialogSizingType::Both,
+		themeManager),
 	m_folderColumns(folderColumns)
 {
 	m_psdcdps = &SetDefaultColumnsDialogPersistentSettings::GetInstance();
@@ -233,14 +234,16 @@ void SetDefaultColumnsDialog::SaveCurrentColumnState(FolderType folderType)
 
 		/* Since the column list will be rebuilt, find this column
 		in the current list, and reuse its width. */
-		ColumnType columnType = static_cast<ColumnType>(lvItem.lParam);
+		auto columnType =
+			ColumnType::_from_integral_nothrow(static_cast<ColumnType::_integral>(lvItem.lParam));
+		CHECK(columnType);
 		auto itr = std::find_if(currentColumns.begin(), currentColumns.end(),
-			[columnType](const Column_t &column) { return column.type == columnType; });
+			[&columnType](const Column_t &column) { return column.type == *columnType; });
 
 		Column_t column;
-		column.type = columnType;
-		column.iWidth = itr->iWidth;
-		column.bChecked = ListView_GetCheckState(hListView, i);
+		column.type = *columnType;
+		column.width = itr->width;
+		column.checked = ListView_GetCheckState(hListView, i);
 		tempColumns.push_back(column);
 	}
 
@@ -259,8 +262,8 @@ void SetDefaultColumnsDialog::SetupFolderColumns(FolderType folderType)
 	for (const auto &column : columns)
 	{
 		TCHAR szText[64];
-		LoadString(GetResourceInstance(), ShellBrowser::LookupColumnNameStringIndex(column.type),
-			szText, SIZEOF_ARRAY(szText));
+		LoadString(GetResourceInstance(),
+			ShellBrowserImpl::LookupColumnNameStringIndex(column.type), szText, std::size(szText));
 
 		LVITEM lvItem;
 		lvItem.mask = LVIF_TEXT | LVIF_PARAM;
@@ -270,12 +273,12 @@ void SetDefaultColumnsDialog::SetupFolderColumns(FolderType folderType)
 		lvItem.lParam = static_cast<LPARAM>(column.type);
 		ListView_InsertItem(hListView, &lvItem);
 
-		ListView_SetCheckState(hListView, iItem, column.bChecked);
+		ListView_SetCheckState(hListView, iItem, column.checked);
 
 		iItem++;
 	}
 
-	ListViewHelper::SelectItem(hListView, 0, TRUE);
+	ListViewHelper::SelectItem(hListView, 0, true);
 }
 
 std::vector<Column_t> &SetDefaultColumnsDialog::GetCurrentColumnList(FolderType folderType)
@@ -302,9 +305,10 @@ std::vector<Column_t> &SetDefaultColumnsDialog::GetCurrentColumnList(FolderType 
 
 	case FolderType::RecycleBin:
 		return m_folderColumns.recycleBinColumns;
-	}
 
-	throw std::runtime_error("Unknown folder type selected");
+	default:
+		LOG(FATAL) << "Unknown folder type selected";
+	}
 }
 
 void SetDefaultColumnsDialog::OnLvnItemChanged(NMLISTVIEW *pnmlv)
@@ -319,12 +323,15 @@ void SetDefaultColumnsDialog::OnLvnItemChanged(NMLISTVIEW *pnmlv)
 		lvItem.iSubItem = 0;
 		ListView_GetItem(hListView, &lvItem);
 
-		int iDescriptionStringIndex = ShellBrowser::LookupColumnDescriptionStringIndex(
-			static_cast<ColumnType>(lvItem.lParam));
+		auto columnType =
+			ColumnType::_from_integral_nothrow(static_cast<ColumnType::_integral>(lvItem.lParam));
+		CHECK(columnType);
+		int iDescriptionStringIndex =
+			ShellBrowserImpl::LookupColumnDescriptionStringIndex(*columnType);
 
 		TCHAR szColumnDescription[128];
 		LoadString(GetResourceInstance(), iDescriptionStringIndex, szColumnDescription,
-			SIZEOF_ARRAY(szColumnDescription));
+			std::size(szColumnDescription));
 		SetDlgItemText(m_hDlg, IDC_COLUMNS_DESCRIPTION, szColumnDescription);
 	}
 }
@@ -339,11 +346,11 @@ void SetDefaultColumnsDialog::OnMoveColumn(bool bUp)
 	{
 		if (bUp)
 		{
-			ListViewHelper::SwapItems(hListView, iSelected, iSelected - 1, TRUE);
+			ListViewHelper::SwapItems(hListView, iSelected, iSelected - 1);
 		}
 		else
 		{
-			ListViewHelper::SwapItems(hListView, iSelected, iSelected + 1, TRUE);
+			ListViewHelper::SwapItems(hListView, iSelected, iSelected + 1);
 		}
 
 		SetFocus(hListView);
@@ -377,14 +384,14 @@ void SetDefaultColumnsDialogPersistentSettings::LoadExtraRegistrySettings(HKEY h
 void SetDefaultColumnsDialogPersistentSettings::SaveExtraXMLSettings(IXMLDOMDocument *pXMLDom,
 	IXMLDOMElement *pParentNode)
 {
-	NXMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_FOLDER_TYPE,
-		NXMLSettings::EncodeIntValue(static_cast<int>(m_FolderType)));
+	XMLSettings::AddAttributeToNode(pXMLDom, pParentNode, SETTING_FOLDER_TYPE,
+		XMLSettings::EncodeIntValue(static_cast<int>(m_FolderType)));
 }
 
 void SetDefaultColumnsDialogPersistentSettings::LoadExtraXMLSettings(BSTR bstrName, BSTR bstrValue)
 {
 	if (lstrcmpi(bstrName, SETTING_FOLDER_TYPE) == 0)
 	{
-		m_FolderType = static_cast<FolderType>(NXMLSettings::DecodeIntValue(bstrValue));
+		m_FolderType = static_cast<FolderType>(XMLSettings::DecodeIntValue(bstrValue));
 	}
 }

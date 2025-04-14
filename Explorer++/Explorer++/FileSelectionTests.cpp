@@ -4,9 +4,11 @@
 
 #include "stdafx.h"
 #include "Explorer++.h"
-#include "ShellBrowser/ShellBrowser.h"
+#include "ClipboardOperations.h"
+#include "DirectoryOperationsHelper.h"
+#include "ShellBrowser/ShellBrowserImpl.h"
 #include "ShellTreeView/ShellTreeView.h"
-#include "TabContainer.h"
+#include "TabContainerImpl.h"
 #include "../Helper/ClipboardHelper.h"
 
 BOOL Explorerplusplus::AnyItemsSelected() const
@@ -15,9 +17,9 @@ BOOL Explorerplusplus::AnyItemsSelected() const
 
 	if (hFocus == m_hActiveListView)
 	{
-		const Tab &selectedTab = GetActivePane()->GetTabContainer()->GetSelectedTab();
+		const Tab &selectedTab = GetActivePane()->GetTabContainerImpl()->GetSelectedTab();
 
-		if (ListView_GetSelectedCount(selectedTab.GetShellBrowser()->GetListView()) > 0)
+		if (ListView_GetSelectedCount(selectedTab.GetShellBrowserImpl()->GetListView()) > 0)
 		{
 			return TRUE;
 		}
@@ -35,27 +37,9 @@ BOOL Explorerplusplus::AnyItemsSelected() const
 
 bool Explorerplusplus::CanCreate() const
 {
-	const Tab &selectedTab = GetActivePane()->GetTabContainer()->GetSelectedTab();
-	auto pidlDirectory = selectedTab.GetShellBrowser()->GetDirectoryIdl();
-
-	SFGAOF attributes = SFGAO_FILESYSTEM;
-	HRESULT hr = GetItemAttributes(pidlDirectory.get(), &attributes);
-
-	if (FAILED(hr))
-	{
-		return false;
-	}
-
-	if ((attributes & SFGAO_FILESYSTEM) == SFGAO_FILESYSTEM)
-	{
-		return true;
-	}
-
-	// Library folders aren't filesystem folders, but they act like them
-	// (e.g. they allow items to be created, copied and moved) and
-	// ultimately they're backed by filesystem folders. If this is a
-	// library folder, file creation will be allowed.
-	return IsChildOfLibrariesFolder(pidlDirectory.get());
+	const Tab &selectedTab = GetActivePane()->GetTabContainerImpl()->GetSelectedTab();
+	auto pidlDirectory = selectedTab.GetShellBrowserImpl()->GetDirectoryIdl();
+	return CanCreateInDirectory(pidlDirectory.get());
 }
 
 BOOL Explorerplusplus::CanCut() const
@@ -106,8 +90,8 @@ HRESULT Explorerplusplus::GetSelectionAttributes(SFGAOF *pItemAttributes) const
 
 	if (hFocus == m_hActiveListView)
 	{
-		const Tab &selectedTab = GetActivePane()->GetTabContainer()->GetSelectedTab();
-		hr = selectedTab.GetShellBrowser()->GetListViewSelectionAttributes(pItemAttributes);
+		const Tab &selectedTab = GetActivePane()->GetTabContainerImpl()->GetSelectedTab();
+		hr = selectedTab.GetShellBrowserImpl()->GetListViewSelectionAttributes(pItemAttributes);
 	}
 	else if (hFocus == m_shellTreeView->GetHWND())
 	{
@@ -119,123 +103,51 @@ HRESULT Explorerplusplus::GetSelectionAttributes(SFGAOF *pItemAttributes) const
 
 HRESULT Explorerplusplus::GetTreeViewSelectionAttributes(SFGAOF *pItemAttributes) const
 {
-	HRESULT hr = E_FAIL;
-	auto hItem = TreeView_GetSelection(m_shellTreeView->GetHWND());
-
-	if (hItem != nullptr)
-	{
-		auto pidl = m_shellTreeView->GetNodePidl(hItem);
-		hr = GetItemAttributes(pidl.get(), pItemAttributes);
-	}
-
-	return hr;
+	auto pidl = m_shellTreeView->GetSelectedNodePidl();
+	return GetItemAttributes(pidl.get(), pItemAttributes);
 }
 
-BOOL Explorerplusplus::CanPaste() const
+BOOL Explorerplusplus::CanPaste(PasteType pasteType) const
 {
-	if (CanPasteShellData(PasteType::Normal))
+	auto directory = MaybeGetFocusedDirectory();
+
+	if (!directory.HasValue())
 	{
-		return TRUE;
+		return false;
 	}
 
-	return CanPasteCustomData();
+	return CanPasteInDirectory(directory.Raw(), pasteType);
 }
 
-BOOL Explorerplusplus::CanPasteShortcut() const
+// Tests whether a hard link or symlink can be pasted.
+bool Explorerplusplus::CanPasteLink() const
 {
-	return CanPasteShellData(PasteType::Shortcut);
+	const auto *activeShellBrowser = GetActiveShellBrowserImpl();
+	return ClipboardOperations::CanPasteLinkInDirectory(
+		activeShellBrowser->GetDirectoryIdl().get());
 }
 
-BOOL Explorerplusplus::CanPasteShellData(PasteType pastType) const
+PidlAbsolute Explorerplusplus::MaybeGetFocusedDirectory() const
 {
-	wil::com_ptr_nothrow<IDataObject> clipboardObject;
-	HRESULT hr = OleGetClipboard(&clipboardObject);
-
-	if (FAILED(hr))
-	{
-		return FALSE;
-	}
-
 	HWND focus = GetFocus();
+
+	if (!focus)
+	{
+		return nullptr;
+	}
+
 	unique_pidl_absolute directory;
 
-	if (focus == m_hActiveListView)
+	const auto *activeShellBrowser = GetActiveShellBrowserImpl();
+
+	if (focus == activeShellBrowser->GetListView())
 	{
-		const Tab &selectedTab = GetActivePane()->GetTabContainer()->GetSelectedTab();
-		directory = selectedTab.GetShellBrowser()->GetDirectoryIdl();
+		directory = activeShellBrowser->GetDirectoryIdl();
 	}
 	else if (focus == m_shellTreeView->GetHWND())
 	{
-		auto item = TreeView_GetSelection(m_shellTreeView->GetHWND());
-
-		if (item)
-		{
-			directory = m_shellTreeView->GetNodePidl(item);
-		}
+		directory = m_shellTreeView->GetSelectedNodePidl();
 	}
 
-	DWORD effects = DROPEFFECT_NONE;
-
-	switch (pastType)
-	{
-	case Explorerplusplus::PasteType::Normal:
-		effects = DROPEFFECT_COPY | DROPEFFECT_MOVE;
-		break;
-
-	case Explorerplusplus::PasteType::Shortcut:
-		effects = DROPEFFECT_LINK;
-		break;
-	}
-
-	if (directory && CanShellPasteDataObject(directory.get(), clipboardObject.get(), effects))
-	{
-		return TRUE;
-	}
-
-	return FALSE;
-}
-
-BOOL Explorerplusplus::CanPasteCustomData() const
-{
-	HWND hFocus = GetFocus();
-
-	std::list<FORMATETC> ftcList;
-	DropHandler::GetDropFormats(ftcList);
-
-	BOOL bDataAvailable = FALSE;
-
-	/* Check whether the drop source has the type of data
-	that is needed for this drag operation. */
-	for (const auto &ftc : ftcList)
-	{
-		if (IsClipboardFormatAvailable(ftc.cfFormat))
-		{
-			bDataAvailable = TRUE;
-			break;
-		}
-	}
-
-	if (hFocus == m_hActiveListView)
-	{
-		return bDataAvailable && CanCreate();
-	}
-	else if (hFocus == m_shellTreeView->GetHWND())
-	{
-		auto hItem = TreeView_GetSelection(m_shellTreeView->GetHWND());
-
-		if (hItem != nullptr)
-		{
-			auto pidl = m_shellTreeView->GetNodePidl(hItem);
-
-			SFGAOF attributes = SFGAO_FILESYSTEM;
-			HRESULT hr = GetItemAttributes(pidl.get(), &attributes);
-
-			if (hr == S_OK)
-			{
-				return bDataAvailable;
-			}
-		}
-	}
-
-	return FALSE;
+	return directory.get();
 }

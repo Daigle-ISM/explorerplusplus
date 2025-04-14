@@ -4,26 +4,11 @@
 
 #include "stdafx.h"
 #include "HistoryEntry.h"
-#include "PreservedHistoryEntry.h"
 
-int HistoryEntry::idCounter = 0;
-
-HistoryEntry::HistoryEntry(PCIDLIST_ABSOLUTE pidl, std::wstring_view displayName,
-	std::wstring_view fullPathForDisplay, std::optional<int> systemIconIndex) :
+HistoryEntry::HistoryEntry(const PidlAbsolute &pidl, InitialNavigationType type) :
 	m_id(idCounter++),
-	m_pidl(ILCloneFull(pidl)),
-	m_displayName(displayName),
-	m_fullPathForDisplay(fullPathForDisplay),
-	m_systemIconIndex(systemIconIndex)
-{
-}
-
-HistoryEntry::HistoryEntry(const PreservedHistoryEntry &preservedHistoryEntry) :
-	m_id(idCounter++),
-	m_pidl(ILCloneFull(preservedHistoryEntry.pidl.get())),
-	m_displayName(preservedHistoryEntry.displayName),
-	m_fullPathForDisplay(preservedHistoryEntry.fullPathForDisplay),
-	m_systemIconIndex(preservedHistoryEntry.systemIconIndex)
+	m_pidl(pidl),
+	m_type(type)
 {
 }
 
@@ -32,44 +17,27 @@ int HistoryEntry::GetId() const
 	return m_id;
 }
 
-unique_pidl_absolute HistoryEntry::GetPidl() const
+const PidlAbsolute &HistoryEntry::GetPidl() const
 {
-	return unique_pidl_absolute(ILCloneFull(m_pidl.get()));
+	return m_pidl;
 }
 
-std::wstring HistoryEntry::GetDisplayName() const
+bool HistoryEntry::IsInitialEntry() const
 {
-	return m_displayName;
+	return m_type == InitialNavigationType::Initial;
 }
 
-std::wstring HistoryEntry::GetFullPathForDisplay() const
+HistoryEntry::InitialNavigationType HistoryEntry::GetInitialNavigationType() const
 {
-	return m_fullPathForDisplay;
+	return m_type;
 }
 
-std::optional<int> HistoryEntry::GetSystemIconIndex() const
+const std::vector<PidlAbsolute> &HistoryEntry::GetSelectedItems() const
 {
-	return m_systemIconIndex;
+	return m_selectedItems;
 }
 
-void HistoryEntry::SetSystemIconIndex(int iconIndex)
+void HistoryEntry::SetSelectedItems(const std::vector<PidlAbsolute> &pidls)
 {
-	if (iconIndex == m_systemIconIndex)
-	{
-		return;
-	}
-
-	m_systemIconIndex = iconIndex;
-
-	historyEntryUpdatedSignal.m_signal(*this, PropertyType::SystemIconIndex);
-}
-
-std::vector<unique_pidl_absolute> HistoryEntry::GetSelectedItems() const
-{
-	return DeepCopyPidls(m_selectedItems);
-}
-
-void HistoryEntry::SetSelectedItems(const std::vector<PCIDLIST_ABSOLUTE> &pidls)
-{
-	m_selectedItems = DeepCopyPidls(pidls);
+	m_selectedItems = pidls;
 }

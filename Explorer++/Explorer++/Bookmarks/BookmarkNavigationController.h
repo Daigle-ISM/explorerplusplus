@@ -5,7 +5,7 @@
 #pragma once
 
 #include "NavigationController.h"
-#include "../Helper/Macros.h"
+#include <boost/core/noncopyable.hpp>
 
 class BookmarkItem;
 class BookmarkNavigatorInterface;
@@ -22,20 +22,19 @@ private:
 	std::wstring m_guid;
 };
 
-class BookmarkNavigationController : public NavigationController<BookmarkHistoryEntry, bool>
+class BookmarkNavigationController :
+	public NavigationController<BookmarkHistoryEntry>,
+	private boost::noncopyable
 {
 public:
 	BookmarkNavigationController(BookmarkTree *bookmarkTree, BookmarkNavigatorInterface *navigator);
 
-	bool Navigate(BookmarkItem *bookmarkFolder, bool addHistoryEntry = true);
+	void Navigate(BookmarkItem *bookmarkFolder, const BookmarkHistoryEntry *entry = nullptr);
 
 private:
-	DISALLOW_COPY_AND_ASSIGN(BookmarkNavigationController);
+	void Navigate(const BookmarkHistoryEntry *entry) override;
 
-	bool Navigate(const BookmarkHistoryEntry *entry) override;
-	bool GetFailureValue() override;
-
-	void OnNavigationCompleted(BookmarkItem *bookmarkFolder, bool addHistoryEntry);
+	void OnNavigationCompleted(BookmarkItem *bookmarkFolder, const BookmarkHistoryEntry *entry);
 
 	BookmarkTree *m_bookmarkTree;
 	BookmarkNavigatorInterface *m_navigator;

@@ -9,7 +9,10 @@
 
 #pragma once
 
-#include "..\targetver.h"
+#pragma warning(push)
+#pragma warning(disable : 4464) // relative include path contains '..'
+#include "../targetver.h"
+#pragma warning(pop)
 
 #define _CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES 1
 
@@ -65,6 +68,10 @@
 #include <windowsx.h>
 #include <winioctl.h>
 #include <wmsdk.h>
+
+#define GLOG_NO_ABBREVIATED_SEVERITIES
+#define GLOG_USE_GLOG_EXPORT
+#include <glog/logging.h>
 
 // WinRT
 #include "WinRTBaseWrapper.h"

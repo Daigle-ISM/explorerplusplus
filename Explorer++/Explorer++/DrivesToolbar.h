@@ -4,21 +4,21 @@
 
 #pragma once
 
-#include "../Helper/FileContextMenuManager.h"
+#include "../Helper/ShellContextMenu.h"
 #include <memory>
 #include <string>
 
+class BrowserWindow;
 class CoreInterface;
 class DriveModel;
 class DrivesToolbarView;
 struct MouseEvent;
-class Navigator;
 
-class DrivesToolbar : private FileContextMenuHandler
+class DrivesToolbar : private ShellContextMenuHandler
 {
 public:
 	static DrivesToolbar *Create(DrivesToolbarView *view, std::unique_ptr<DriveModel> driveModel,
-		CoreInterface *coreInterface, Navigator *navigator);
+		BrowserWindow *browserWindow, CoreInterface *coreInterface);
 
 	DrivesToolbar(const DrivesToolbar &) = delete;
 	DrivesToolbar(DrivesToolbar &&) = delete;
@@ -28,13 +28,10 @@ public:
 	DrivesToolbarView *GetView() const;
 
 private:
-	static constexpr int MIN_SHELL_MENU_ID = 1;
-	static constexpr int MAX_SHELL_MENU_ID = 1000;
-
-	static constexpr int MENU_ID_OPEN_IN_NEW_TAB = (MAX_SHELL_MENU_ID + 1);
+	static const int OPEN_IN_NEW_TAB_MENU_ITEM_ID = ShellContextMenu::MAX_SHELL_MENU_ID + 1;
 
 	DrivesToolbar(DrivesToolbarView *view, std::unique_ptr<DriveModel> driveModel,
-		CoreInterface *coreInterface, Navigator *navigator);
+		BrowserWindow *browserWindow, CoreInterface *coreInterface);
 	~DrivesToolbar();
 
 	void Initialize();
@@ -53,18 +50,18 @@ private:
 	void ShowContextMenu(const std::wstring &drivePath, const POINT &ptClient, bool showExtended);
 
 	// FileContextMenuHandler
-	void UpdateMenuEntries(PCIDLIST_ABSOLUTE pidlParent,
-		const std::vector<PITEMID_CHILD> &pidlItems, DWORD_PTR dwData, IContextMenu *contextMenu,
-		HMENU hMenu) override;
-	BOOL HandleShellMenuItem(PCIDLIST_ABSOLUTE pidlParent,
-		const std::vector<PITEMID_CHILD> &pidlItems, DWORD_PTR dwData, const TCHAR *szCmd) override;
-	void HandleCustomMenuItem(PCIDLIST_ABSOLUTE pidlParent,
-		const std::vector<PITEMID_CHILD> &pidlItems, int iCmd) override;
+	void UpdateMenuEntries(HMENU menu, PCIDLIST_ABSOLUTE pidlParent,
+		const std::vector<PidlChild> &pidlItems, IContextMenu *contextMenu) override;
+	std::wstring GetHelpTextForItem(UINT menuItemId) override;
+	bool HandleShellMenuItem(PCIDLIST_ABSOLUTE pidlParent, const std::vector<PidlChild> &pidlItems,
+		const std::wstring &verb) override;
+	void HandleCustomMenuItem(PCIDLIST_ABSOLUTE pidlParent, const std::vector<PidlChild> &pidlItems,
+		UINT menuItemId) override;
 
 	void OnWindowDestroyed();
 
-	DrivesToolbarView *m_view;
+	DrivesToolbarView *m_view = nullptr;
 	std::unique_ptr<DriveModel> m_driveModel;
-	CoreInterface *m_coreInterface;
-	Navigator *m_navigator;
+	BrowserWindow *m_browserWindow = nullptr;
+	CoreInterface *m_coreInterface = nullptr;
 };

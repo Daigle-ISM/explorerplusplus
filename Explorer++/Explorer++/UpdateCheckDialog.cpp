@@ -12,9 +12,13 @@
 #include "stdafx.h"
 #include "UpdateCheckDialog.h"
 #include "MainResource.h"
+#include "ResourceHelper.h"
 #include "Version.h"
-#include <boost\algorithm\string.hpp>
-#include <boost\lexical_cast.hpp>
+#include "VersionHelper.h"
+#include <boost/algorithm/string.hpp>
+#include <boost/lexical_cast.hpp>
+#include <fmt/format.h>
+#include <fmt/xchar.h>
 #include <stdexcept>
 #include <vector>
 
@@ -22,8 +26,9 @@ const TCHAR UpdateCheckDialogPersistentSettings::SETTINGS_KEY[] = _T("UpdateChec
 const TCHAR UpdateCheckDialog::VERSION_FILE_URL[] =
 	_T("https://explorerplusplus.com/software/version.txt");
 
-UpdateCheckDialog::UpdateCheckDialog(HINSTANCE resourceInstance, HWND hParent) :
-	ThemedDialog(resourceInstance, IDD_UPDATECHECK, hParent, DialogSizingType::None),
+UpdateCheckDialog::UpdateCheckDialog(HINSTANCE resourceInstance, HWND hParent,
+	ThemeManager *themeManager) :
+	ThemedDialog(resourceInstance, IDD_UPDATECHECK, hParent, DialogSizingType::None, themeManager),
 	m_UpdateCheckComplete(false)
 {
 	m_pucdps = &UpdateCheckDialogPersistentSettings::GetInstance();
@@ -31,11 +36,11 @@ UpdateCheckDialog::UpdateCheckDialog(HINSTANCE resourceInstance, HWND hParent) :
 
 INT_PTR UpdateCheckDialog::OnInitDialog()
 {
-	SetDlgItemText(m_hDlg, IDC_STATIC_CURRENT_VERSION, VERSION_STRING_W);
+	SetDlgItemText(m_hDlg, IDC_STATIC_CURRENT_VERSION,
+		VersionHelper::GetVersion().GetString().c_str());
 
-	TCHAR szTemp[64];
-	LoadString(GetResourceInstance(), IDS_UPDATE_CHECK_STATUS, szTemp, SIZEOF_ARRAY(szTemp));
-	SetDlgItemText(m_hDlg, IDC_STATIC_UPDATE_STATUS, szTemp);
+	auto status = ResourceHelper::LoadString(GetResourceInstance(), IDS_UPDATE_CHECK_STATUS);
+	SetDlgItemText(m_hDlg, IDC_STATIC_UPDATE_STATUS, status.c_str());
 
 	SetTimer(m_hDlg, 0, STATUS_TIMER_ELAPSED, nullptr);
 
@@ -63,7 +68,7 @@ DWORD WINAPI UpdateCheckDialog::UpdateCheckThread(LPVOID pParam)
 void UpdateCheckDialog::PerformUpdateCheck(HWND hDlg)
 {
 	TCHAR tempPath[MAX_PATH];
-	DWORD pathRes = GetTempPath(SIZEOF_ARRAY(tempPath), tempPath);
+	DWORD pathRes = GetTempPath(std::size(tempPath), tempPath);
 
 	if (pathRes == 0)
 	{
@@ -114,20 +119,16 @@ void UpdateCheckDialog::PerformUpdateCheck(HWND hDlg)
 
 				try
 				{
-					UpdateCheckDialog::Version version;
-					version.MajorVersion = boost::lexical_cast<int>(versionNumberComponents.at(0));
-					version.MinorVersion = boost::lexical_cast<int>(versionNumberComponents.at(1));
-					version.MicroVersion = boost::lexical_cast<int>(versionNumberComponents.at(2));
-					MultiByteToWideChar(CP_ACP, 0, versionNumber, -1, version.VersionString,
-						SIZEOF_ARRAY(version.VersionString));
-
+					Version version{ boost::lexical_cast<uint32_t>(versionNumberComponents.at(0)),
+						boost::lexical_cast<uint32_t>(versionNumberComponents.at(1)),
+						boost::lexical_cast<uint32_t>(versionNumberComponents.at(2)) };
 					SendMessage(hDlg, UpdateCheckDialog::WM_APP_UPDATE_CHECK_COMPLETE,
 						UpdateCheckDialog::UPDATE_CHECK_SUCCESS,
 						reinterpret_cast<LPARAM>(&version));
 
 					versionRetrieved = true;
 				}
-				catch (std::out_of_range)
+				catch (const boost::bad_lexical_cast &)
 				{
 					/* VersionRetrieved won't be set, so an error
 					will be returned below. Nothing needs to be done
@@ -178,33 +179,28 @@ INT_PTR UpdateCheckDialog::OnPrivateMessage(UINT uMsg, WPARAM wParam, LPARAM lPa
 
 void UpdateCheckDialog::OnUpdateCheckError()
 {
-	TCHAR szTemp[64];
-	LoadString(GetResourceInstance(), IDS_UPDATE_CHECK_ERROR, szTemp, SIZEOF_ARRAY(szTemp));
-	SetDlgItemText(m_hDlg, IDC_STATIC_UPDATE_STATUS, szTemp);
+	auto error = ResourceHelper::LoadString(GetResourceInstance(), IDS_UPDATE_CHECK_ERROR);
+	SetDlgItemText(m_hDlg, IDC_STATIC_UPDATE_STATUS, error.c_str());
 }
 
-void UpdateCheckDialog::OnUpdateCheckSuccess(Version *version)
+void UpdateCheckDialog::OnUpdateCheckSuccess(Version *availableVersion)
 {
-	TCHAR szStatus[128];
-	TCHAR szTemp[128];
+	std::wstring status;
+	const auto &currentVersion = VersionHelper::GetVersion();
 
-	if ((version->MajorVersion > MAJOR_VERSION)
-		|| (version->MajorVersion == MAJOR_VERSION && version->MinorVersion > MINOR_VERSION)
-		|| (version->MajorVersion == MAJOR_VERSION && version->MinorVersion == MINOR_VERSION
-			&& version->MicroVersion > MICRO_VERSION))
+	if (*availableVersion > currentVersion)
 	{
-		LoadString(GetResourceInstance(), IDS_UPDATE_CHECK_NEW_VERSION_AVAILABLE, szTemp,
-			SIZEOF_ARRAY(szTemp));
-		StringCchPrintf(szStatus, SIZEOF_ARRAY(szStatus), szTemp, version->VersionString);
+		std::wstring statusTemplate = ResourceHelper::LoadString(GetResourceInstance(),
+			IDS_UPDATE_CHECK_NEW_VERSION_AVAILABLE);
+		status = fmt::format(fmt::runtime(statusTemplate),
+			fmt::arg(L"available_version", availableVersion->GetString()));
 	}
 	else
 	{
-		LoadString(GetResourceInstance(), IDS_UPDATE_CHECK_UP_TO_DATE, szTemp,
-			SIZEOF_ARRAY(szTemp));
-		StringCchPrintf(szStatus, SIZEOF_ARRAY(szStatus), szTemp, version->VersionString);
+		status = ResourceHelper::LoadString(GetResourceInstance(), IDS_UPDATE_CHECK_UP_TO_DATE);
 	}
 
-	SetDlgItemText(m_hDlg, IDC_STATIC_UPDATE_STATUS, szStatus);
+	SetDlgItemText(m_hDlg, IDC_STATIC_UPDATE_STATUS, status.c_str());
 }
 
 INT_PTR UpdateCheckDialog::OnCommand(WPARAM wParam, LPARAM lParam)
@@ -234,18 +230,11 @@ INT_PTR UpdateCheckDialog::OnTimer(int iTimerID)
 		return 0;
 	}
 
-	TCHAR updateStatus[64];
-	LoadString(GetResourceInstance(), IDS_UPDATE_CHECK_STATUS, updateStatus,
-		SIZEOF_ARRAY(updateStatus));
-
 	static int step = 0;
 
-	for (int i = 0; i < step; i++)
-	{
-		StringCchCat(updateStatus, SIZEOF_ARRAY(updateStatus), _T("."));
-	}
-
-	SetDlgItemText(m_hDlg, IDC_STATIC_UPDATE_STATUS, updateStatus);
+	auto updateStatus = ResourceHelper::LoadString(GetResourceInstance(), IDS_UPDATE_CHECK_STATUS);
+	updateStatus += std::wstring(step, '.');
+	SetDlgItemText(m_hDlg, IDC_STATIC_UPDATE_STATUS, updateStatus.c_str());
 
 	step++;
 
@@ -266,7 +255,7 @@ INT_PTR UpdateCheckDialog::OnNotify(NMHDR *pnmhdr)
 		if (pnmhdr->hwndFrom == GetDlgItem(m_hDlg, IDC_SYSLINK_DOWNLOAD))
 		{
 			auto pnmlink = reinterpret_cast<PNMLINK>(pnmhdr);
-			ShellExecute(nullptr, L"open", pnmlink->item.szUrl, nullptr, nullptr, SW_SHOW);
+			ShellExecute(nullptr, L"open", pnmlink->item.szUrl, nullptr, nullptr, SW_SHOWNORMAL);
 		}
 		break;
 	}

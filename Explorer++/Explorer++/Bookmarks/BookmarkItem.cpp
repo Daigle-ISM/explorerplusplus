@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #include "Bookmarks/BookmarkItem.h"
+#include <glog/logging.h>
 
 BookmarkItem::BookmarkItem(std::optional<std::wstring> guid, std::wstring_view name,
 	std::optional<std::wstring> location) :
@@ -17,8 +18,8 @@ BookmarkItem::BookmarkItem(std::optional<std::wstring> guid, std::wstring_view n
 // Bookmark deserialization constructor.
 BookmarkItem::BookmarkItem(std::wstring_view originalGuid, std::wstring_view name,
 	std::wstring location, bool internal) :
-	m_originalGuid(originalGuid),
 	m_type(Type::Bookmark),
+	m_originalGuid(originalGuid),
 	m_name(name),
 	m_location(location)
 {
@@ -28,8 +29,8 @@ BookmarkItem::BookmarkItem(std::wstring_view originalGuid, std::wstring_view nam
 // Bookmark folder deserialization constructor.
 BookmarkItem::BookmarkItem(std::wstring_view originalGuid, std::wstring_view name,
 	BookmarkItems &&children) :
-	m_originalGuid(originalGuid),
 	m_type(Type::Folder),
+	m_originalGuid(originalGuid),
 	m_name(name),
 	m_children(std::move(children))
 {
@@ -108,7 +109,7 @@ std::wstring BookmarkItem::GetLocation() const
 
 void BookmarkItem::SetLocation(std::wstring_view location)
 {
-	assert(m_type == Type::Bookmark);
+	DCHECK(IsBookmark());
 
 	m_location = location;
 
@@ -148,8 +149,8 @@ BookmarkItem *BookmarkItem::AddChild(std::unique_ptr<BookmarkItem> bookmarkItem)
 
 BookmarkItem *BookmarkItem::AddChild(std::unique_ptr<BookmarkItem> bookmarkItem, size_t index)
 {
-	assert(m_type == Type::Folder);
-	assert(index <= m_children.size());
+	DCHECK(IsFolder());
+	CHECK(index <= m_children.size());
 
 	bookmarkItem->m_parent = this;
 
@@ -163,7 +164,7 @@ BookmarkItem *BookmarkItem::AddChild(std::unique_ptr<BookmarkItem> bookmarkItem,
 
 std::unique_ptr<BookmarkItem> BookmarkItem::RemoveChild(size_t index)
 {
-	assert(m_type == Type::Folder);
+	DCHECK(IsFolder());
 
 	if (index >= m_children.size())
 	{
@@ -183,18 +184,11 @@ std::unique_ptr<BookmarkItem> BookmarkItem::RemoveChild(size_t index)
 
 size_t BookmarkItem::GetChildIndex(const BookmarkItem *bookmarkItem) const
 {
-	assert(m_type == Type::Folder);
+	DCHECK(IsFolder());
 
 	auto itr = std::find_if(m_children.begin(), m_children.end(),
-		[bookmarkItem](const auto &item)
-		{
-			return item.get() == bookmarkItem;
-		});
-
-	if (itr == m_children.end())
-	{
-		throw std::invalid_argument("BookmarkItem not found");
-	}
+		[bookmarkItem](const auto &item) { return item.get() == bookmarkItem; });
+	CHECK(itr != m_children.end()) << "BookmarkItem not found";
 
 	return itr - m_children.begin();
 }
@@ -202,38 +196,28 @@ size_t BookmarkItem::GetChildIndex(const BookmarkItem *bookmarkItem) const
 const std::unique_ptr<BookmarkItem> &BookmarkItem::GetChildOwnedPtr(
 	const BookmarkItem *bookmarkItem) const
 {
-	assert(m_type == Type::Folder);
+	DCHECK(IsFolder());
 
 	auto itr = std::find_if(m_children.begin(), m_children.end(),
-		[bookmarkItem](const auto &item)
-		{
-			return item.get() == bookmarkItem;
-		});
-
-	if (itr == m_children.end())
-	{
-		throw std::invalid_argument("BookmarkItem not found");
-	}
+		[bookmarkItem](const auto &item) { return item.get() == bookmarkItem; });
+	CHECK(itr != m_children.end()) << "BookmarkItem not found";
 
 	return *itr;
 }
 
 bool BookmarkItem::HasChildFolder() const
 {
-	assert(m_type == Type::Folder);
+	DCHECK(IsFolder());
 
 	bool anyChildFolders = std::any_of(m_children.begin(), m_children.end(),
-		[](const auto &item)
-		{
-			return item->IsFolder();
-		});
+		[](const auto &item) { return item->IsFolder(); });
 
 	return anyChildFolders;
 }
 
 const BookmarkItems &BookmarkItem::GetChildren() const
 {
-	assert(m_type == Type::Folder);
+	DCHECK(IsFolder());
 
 	return m_children;
 }

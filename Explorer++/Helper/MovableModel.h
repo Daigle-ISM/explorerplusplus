@@ -55,7 +55,10 @@ public:
 
 	ItemType *AddItem(std::unique_ptr<ItemType> item, size_t index)
 	{
-		assert(index <= m_items.size());
+		if (index > m_items.size())
+		{
+			index = m_items.size();
+		}
 
 		item->AddUpdatedObserver(std::bind_front(&MovableModel::OnItemUpdated, this));
 
@@ -68,9 +71,9 @@ public:
 
 	void MoveItem(ItemType *item, size_t index)
 	{
-		if (index > m_items.size())
+		if (index >= m_items.size())
 		{
-			index = m_items.size();
+			index = m_items.size() - 1;
 		}
 
 		auto oldIndex = GetItemIndex(item);
@@ -92,10 +95,7 @@ public:
 	void RemoveItem(const ItemType *item)
 	{
 		auto itr = std::find_if(m_items.begin(), m_items.end(),
-			[item](const auto &currentEntry)
-			{
-				return currentEntry.get() == item;
-			});
+			[item](const auto &currentEntry) { return currentEntry.get() == item; });
 
 		if (itr == m_items.end())
 		{
@@ -125,15 +125,8 @@ public:
 	size_t GetItemIndex(const ItemType *item) const
 	{
 		auto itr = std::find_if(m_items.begin(), m_items.end(),
-			[item](const auto &currentEntry)
-			{
-				return currentEntry.get() == item;
-			});
-
-		if (itr == m_items.end())
-		{
-			throw std::invalid_argument("Item not found");
-		}
+			[item](const auto &currentEntry) { return currentEntry.get() == item; });
+		CHECK(itr != m_items.end()) << "Item not found";
 
 		return itr - m_items.begin();
 	}

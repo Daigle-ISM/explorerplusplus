@@ -4,15 +4,16 @@
 
 #include "stdafx.h"
 #include "ShellChangeWatcher.h"
-#include "../Helper/Logging.h"
-#include "../Helper/WindowSubclassWrapper.h"
+#include "../Helper/StringHelper.h"
+#include "../Helper/WindowSubclass.h"
+#include <glog/logging.h>
 
 ShellChangeWatcher::ShellChangeWatcher(HWND hwnd,
 	ProcessNotificationsCallback processNotificationsCallback) :
 	m_hwnd(hwnd),
 	m_processNotificationsCallback(processNotificationsCallback)
 {
-	m_windowSubclasses.push_back(std::make_unique<WindowSubclassWrapper>(hwnd,
+	m_windowSubclasses.push_back(std::make_unique<WindowSubclass>(hwnd,
 		std::bind_front(&ShellChangeWatcher::WndProc, this)));
 }
 
@@ -21,11 +22,11 @@ ShellChangeWatcher::~ShellChangeWatcher()
 	StopWatchingAll();
 }
 
-ULONG ShellChangeWatcher::StartWatching(PCIDLIST_ABSOLUTE pidl, LONG events)
+ULONG ShellChangeWatcher::StartWatching(PCIDLIST_ABSOLUTE pidl, LONG events, bool recursive)
 {
 	SHChangeNotifyEntry entry;
 	entry.pidl = pidl;
-	entry.fRecursive = false;
+	entry.fRecursive = recursive;
 	ULONG changeNotifyId = SHChangeNotifyRegister(m_hwnd,
 		SHCNRF_ShellLevel | SHCNRF_InterruptLevel | SHCNRF_NewDelivery, events, WM_APP_SHELL_NOTIFY,
 		1, &entry);
@@ -37,27 +38,28 @@ ULONG ShellChangeWatcher::StartWatching(PCIDLIST_ABSOLUTE pidl, LONG events)
 
 		if (SUCCEEDED(hr))
 		{
-			LOG(warning) << L"Couldn't monitor directory \"" << path << L"\" for changes.";
+			LOG(WARNING) << "Couldn't monitor directory \"" << wstrToUtf8Str(path)
+						 << "\" for changes.";
 		}
 
 		return 0;
 	}
 
-	[[maybe_unused]] auto insertionResult = m_changeNotifyIds.insert(changeNotifyId);
+	auto insertionResult = m_changeNotifyIds.insert(changeNotifyId);
 
 	// Change IDs are unique, so there should never be an attempt to insert a duplicate ID.
-	assert(insertionResult.second);
+	DCHECK(insertionResult.second);
 
 	return changeNotifyId;
 }
 
 void ShellChangeWatcher::StopWatching(ULONG changeNotifyId)
 {
-	[[maybe_unused]] auto res = SHChangeNotifyDeregister(changeNotifyId);
-	assert(res);
+	auto res = SHChangeNotifyDeregister(changeNotifyId);
+	DCHECK(res);
 
-	[[maybe_unused]] auto numErased = m_changeNotifyIds.erase(changeNotifyId);
-	assert(numErased == 1);
+	auto numErased = m_changeNotifyIds.erase(changeNotifyId);
+	DCHECK_EQ(numErased, 1u);
 }
 
 void ShellChangeWatcher::StopWatchingAll()
@@ -67,8 +69,8 @@ void ShellChangeWatcher::StopWatchingAll()
 
 	for (ULONG changeNotifyId : m_changeNotifyIds)
 	{
-		[[maybe_unused]] auto res = SHChangeNotifyDeregister(changeNotifyId);
-		assert(res);
+		auto res = SHChangeNotifyDeregister(changeNotifyId);
+		DCHECK(res);
 	}
 
 	m_changeNotifyIds.clear();

@@ -5,36 +5,30 @@
 #include "stdafx.h"
 #include "Bookmarks/BookmarkIconManager.h"
 #include "Bookmarks/BookmarkItem.h"
-#include "CoreInterface.h"
 #include "Icon.h"
+#include "IconFetcher.h"
 #include "IconResourceLoader.h"
-#include "../Helper/CachedIcons.h"
-#include "../Helper/IconFetcher.h"
 #include "../Helper/ImageHelper.h"
+#include "../Helper/ShellHelper.h"
+#include "../Helper/WeakPtr.h"
 
-BookmarkIconManager::BookmarkIconManager(CoreInterface *coreInterface, IconFetcher *iconFetcher,
-	int iconWidth, int iconHeight) :
-	m_coreInterface(coreInterface),
+BookmarkIconManager::BookmarkIconManager(const IconResourceLoader *iconResourceLoader,
+	IconFetcher *iconFetcher, int iconWidth, int iconHeight) :
 	m_iconFetcher(iconFetcher),
-	m_defaultFolderIconSystemImageListIndex(GetDefaultFolderIconIndex()),
-	m_destroyed(std::make_shared<bool>(false))
+	m_weakPtrFactory(this)
 {
 	m_imageList.reset(ImageList_Create(iconWidth, iconHeight, ILC_COLOR32 | ILC_MASK, 0, 1));
 
 	wil::unique_hbitmap folderIcon =
-		m_coreInterface->GetIconResourceLoader()->LoadBitmapFromPNGAndScale(Icon::Folder, iconWidth,
-			iconHeight);
+		iconResourceLoader->LoadBitmapFromPNGAndScale(Icon::Folder, iconWidth, iconHeight);
 	m_bookmarkFolderIconIndex = ImageList_Add(m_imageList.get(), folderIcon.get(), nullptr);
 
 	SHGetImageList(SHIL_SYSSMALL, IID_PPV_ARGS(&m_systemImageList));
+
+	FAIL_FAST_IF_FAILED(GetDefaultFolderIconIndex(m_defaultFolderIconSystemImageListIndex));
 	m_defaultFolderIconIndex = ImageHelper::CopyImageListIcon(m_imageList.get(),
 		reinterpret_cast<HIMAGELIST>(m_systemImageList.get()),
 		m_defaultFolderIconSystemImageListIndex);
-}
-
-BookmarkIconManager::~BookmarkIconManager()
-{
-	*m_destroyed = true;
 }
 
 HIMAGELIST BookmarkIconManager::GetImageList()
@@ -64,31 +58,33 @@ int BookmarkIconManager::GetIconForBookmark(const BookmarkItem *bookmark,
 {
 	int iconIndex = m_defaultFolderIconIndex;
 
-	auto cachedItr = m_coreInterface->GetCachedIcons()->findByPath(bookmark->GetLocation());
+	auto cachedIconIndex = m_iconFetcher->GetCachedIconIndex(bookmark->GetLocation());
 
-	if (cachedItr != m_coreInterface->GetCachedIcons()->end())
+	if (cachedIconIndex)
 	{
-		iconIndex = AddSystemIconToImageList(cachedItr->iconIndex);
+		iconIndex = AddSystemIconToImageList(*cachedIconIndex);
 	}
 	else
 	{
 		m_iconFetcher->QueueIconTask(bookmark->GetLocation(),
-			[this, callback, destroyed = m_destroyed](int systemIconIndex)
+			[callback, self = m_weakPtrFactory.GetWeakPtr()](int iconIndex, int overlayIndex)
 			{
-				if (*destroyed || !callback)
+				UNREFERENCED_PARAMETER(overlayIndex);
+
+				if (!self || !callback)
 				{
 					return;
 				}
 
-				if (systemIconIndex == m_defaultFolderIconSystemImageListIndex)
+				if (iconIndex == self->m_defaultFolderIconSystemImageListIndex)
 				{
 					// Bookmarks use the standard folder icon by default, so if that's the icon
 					// they're actually using, nothing else needs to happen.
 					return;
 				}
 
-				int iconIndex = AddSystemIconToImageList(systemIconIndex);
-				callback(iconIndex);
+				int copiedIconIndex = self->AddSystemIconToImageList(iconIndex);
+				callback(copiedIconIndex);
 			});
 	}
 
@@ -106,8 +102,6 @@ int BookmarkIconManager::AddSystemIconToImageList(int systemIconIndex)
 		return m_defaultFolderIconIndex;
 	}
 
-	int iconIndex = ImageHelper::CopyImageListIcon(m_imageList.get(),
+	return ImageHelper::CopyImageListIcon(m_imageList.get(),
 		reinterpret_cast<HIMAGELIST>(m_systemImageList.get()), systemIconIndex);
-
-	return iconIndex;
 }

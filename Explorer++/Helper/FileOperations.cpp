@@ -7,22 +7,16 @@
 #include "DragDropHelper.h"
 #include "DriveInfo.h"
 #include "Helper.h"
-#include "Macros.h"
 #include "ShellHelper.h"
 #include "StringHelper.h"
 #include <wil/com.h>
+#include <filesystem>
 #include <list>
 #include <sstream>
 
-enum class PasteType
-{
-	HardLink
-};
-
-int PasteFilesFromClipboardSpecial(const TCHAR *szDestination, PasteType pasteType);
 BOOL GetFileClusterSize(const std::wstring &strFilename, PLARGE_INTEGER lpRealFileSize);
 
-HRESULT NFileOperations::RenameFile(IShellItem *item, const std::wstring &newName)
+HRESULT FileOperations::RenameFile(IShellItem *item, const std::wstring &newName)
 {
 	wil::com_ptr_nothrow<IFileOperation> fo;
 	HRESULT hr = CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_ALL, IID_PPV_ARGS(&fo));
@@ -51,7 +45,7 @@ HRESULT NFileOperations::RenameFile(IShellItem *item, const std::wstring &newNam
 	return hr;
 }
 
-HRESULT NFileOperations::DeleteFiles(HWND hwnd, std::vector<PCIDLIST_ABSOLUTE> &pidls,
+HRESULT FileOperations::DeleteFiles(HWND hwnd, const std::vector<PCIDLIST_ABSOLUTE> &pidls,
 	bool permanent, bool silent)
 {
 	wil::com_ptr_nothrow<IFileOperation> fo;
@@ -124,11 +118,11 @@ HRESULT NFileOperations::DeleteFiles(HWND hwnd, std::vector<PCIDLIST_ABSOLUTE> &
 	return hr;
 }
 
-HRESULT NFileOperations::CopyFilesToFolder(HWND hOwner, const std::wstring &strTitle,
+HRESULT FileOperations::CopyFilesToFolder(HWND hOwner, const std::wstring &strTitle,
 	std::vector<PCIDLIST_ABSOLUTE> &pidls, bool move)
 {
 	unique_pidl_absolute pidl;
-	BOOL bRes = NFileOperations::CreateBrowseDialog(hOwner, strTitle, wil::out_param(pidl));
+	BOOL bRes = CreateBrowseDialog(hOwner, strTitle, wil::out_param(pidl));
 
 	if (!bRes)
 	{
@@ -148,7 +142,7 @@ HRESULT NFileOperations::CopyFilesToFolder(HWND hOwner, const std::wstring &strT
 	return hr;
 }
 
-HRESULT NFileOperations::CopyFiles(HWND hwnd, IShellItem *destinationFolder,
+HRESULT FileOperations::CopyFiles(HWND hwnd, IShellItem *destinationFolder,
 	std::vector<PCIDLIST_ABSOLUTE> &pidls, bool move)
 {
 	wil::com_ptr_nothrow<IFileOperation> fo;
@@ -209,7 +203,7 @@ HRESULT NFileOperations::CopyFiles(HWND hwnd, IShellItem *destinationFolder,
 	return hr;
 }
 
-TCHAR *NFileOperations::BuildFilenameList(const std::list<std::wstring> &FilenameList)
+TCHAR *FileOperations::BuildFilenameList(const std::list<std::wstring> &FilenameList)
 {
 	TCHAR *pszFilenames = nullptr;
 	int iTotalSize = 0;
@@ -234,7 +228,7 @@ TCHAR *NFileOperations::BuildFilenameList(const std::list<std::wstring> &Filenam
 
 // Creates a new folder. Note that IFileOperation will take care of
 // renaming the folder if one with that name already exists.
-HRESULT NFileOperations::CreateNewFolder(IShellItem *destinationFolder,
+HRESULT FileOperations::CreateNewFolder(IShellItem *destinationFolder,
 	const std::wstring &newFolderName, IFileOperationProgressSink *progressSink)
 {
 	wil::com_ptr_nothrow<IFileOperation> fo;
@@ -265,7 +259,7 @@ HRESULT NFileOperations::CreateNewFolder(IShellItem *destinationFolder,
 	return hr;
 }
 
-BOOL NFileOperations::SaveDirectoryListing(const std::wstring &strDirectory,
+BOOL FileOperations::SaveDirectoryListing(const std::wstring &strDirectory,
 	const std::wstring &strFilename)
 {
 	std::wstring strContents = _T("Directory\r\n---------\r\n") + strDirectory + _T("\r\n\r\n");
@@ -278,7 +272,7 @@ BOOL NFileOperations::SaveDirectoryListing(const std::wstring &strDirectory,
 	LocalFileTimeToFileTime(&ft, &lft);
 
 	TCHAR szTime[128];
-	CreateFileTimeString(&lft, szTime, SIZEOF_ARRAY(szTime), FALSE);
+	CreateFileTimeString(&lft, szTime, std::size(szTime), FALSE);
 	strContents += _T("Date\r\n----\r\n") + std::wstring(szTime) + _T("\r\n\r\n");
 
 	std::wstring strSearch = strDirectory + _T("\\*");
@@ -394,17 +388,17 @@ BOOL NFileOperations::SaveDirectoryListing(const std::wstring &strDirectory,
 	return FALSE;
 }
 
-HRESULT CopyFiles(const std::vector<PCIDLIST_ABSOLUTE> &items, IDataObject **dataObjectOut)
+HRESULT CopyFiles(const std::vector<PidlAbsolute> &items, IDataObject **dataObjectOut)
 {
 	return CopyFilesToClipboard(items, false, dataObjectOut);
 }
 
-HRESULT CutFiles(const std::vector<PCIDLIST_ABSOLUTE> &items, IDataObject **dataObjectOut)
+HRESULT CutFiles(const std::vector<PidlAbsolute> &items, IDataObject **dataObjectOut)
 {
 	return CopyFilesToClipboard(items, true, dataObjectOut);
 }
 
-HRESULT CopyFilesToClipboard(const std::vector<PCIDLIST_ABSOLUTE> &items, bool move,
+HRESULT CopyFilesToClipboard(const std::vector<PidlAbsolute> &items, bool move,
 	IDataObject **dataObjectOut)
 {
 	wil::com_ptr_nothrow<IDataObject> dataObject;
@@ -426,76 +420,7 @@ HRESULT CopyFilesToClipboard(const std::vector<PCIDLIST_ABSOLUTE> &items, bool m
 	return S_OK;
 }
 
-int PasteHardLinks(const TCHAR *szDestination)
-{
-	return PasteFilesFromClipboardSpecial(szDestination, PasteType::HardLink);
-}
-
-/* TODO: Use CDropHandler. */
-int PasteFilesFromClipboardSpecial(const TCHAR *szDestination, PasteType pasteType)
-{
-	IDataObject *clipboardObject = nullptr;
-	DROPFILES *pdf = nullptr;
-	FORMATETC ftc;
-	STGMEDIUM stg;
-	HRESULT hr;
-	TCHAR szFileName[MAX_PATH];
-	TCHAR szLinkFileName[MAX_PATH];
-	TCHAR szOldFileName[MAX_PATH];
-	int nFilesCopied = -1;
-	int i = 0;
-
-	hr = OleGetClipboard(&clipboardObject);
-
-	if (SUCCEEDED(hr))
-	{
-		ftc.cfFormat = CF_HDROP;
-		ftc.ptd = nullptr;
-		ftc.dwAspect = DVASPECT_CONTENT;
-		ftc.lindex = -1;
-		ftc.tymed = TYMED_HGLOBAL;
-
-		hr = clipboardObject->GetData(&ftc, &stg);
-
-		if (SUCCEEDED(hr))
-		{
-			pdf = (DROPFILES *) GlobalLock(stg.hGlobal);
-
-			if (pdf != nullptr)
-			{
-				nFilesCopied = DragQueryFile((HDROP) pdf, 0xFFFFFFFF, nullptr, 0);
-
-				for (i = 0; i < nFilesCopied; i++)
-				{
-					DragQueryFile((HDROP) pdf, i, szOldFileName, SIZEOF_ARRAY(szOldFileName));
-
-					StringCchCopy(szLinkFileName, SIZEOF_ARRAY(szLinkFileName), szDestination);
-
-					StringCchCopy(szFileName, SIZEOF_ARRAY(szFileName), szOldFileName);
-					PathStripPath(szFileName);
-
-					PathAppend(szLinkFileName, szFileName);
-
-					switch (pasteType)
-					{
-					case PasteType::HardLink:
-						CreateHardLink(szLinkFileName, szOldFileName, nullptr);
-						break;
-					}
-				}
-
-				GlobalUnlock(stg.hGlobal);
-			}
-
-			ReleaseStgMedium(&stg);
-		}
-		clipboardObject->Release();
-	}
-
-	return nFilesCopied;
-}
-
-HRESULT NFileOperations::CreateLinkToFile(const std::wstring &strTargetFilename,
+HRESULT FileOperations::CreateLinkToFile(const std::wstring &strTargetFilename,
 	const std::wstring &strLinkFilename, const std::wstring &strLinkDescription)
 {
 	IShellLink *pShellLink = nullptr;
@@ -522,7 +447,7 @@ HRESULT NFileOperations::CreateLinkToFile(const std::wstring &strTargetFilename,
 	return hr;
 }
 
-HRESULT NFileOperations::ResolveLink(HWND hwnd, DWORD fFlags, const TCHAR *szLinkFilename,
+HRESULT FileOperations::ResolveLink(HWND hwnd, DWORD fFlags, const TCHAR *szLinkFilename,
 	TCHAR *szResolvedPath, int nBufferSize)
 {
 	SHFILEINFO shfi;
@@ -551,7 +476,7 @@ HRESULT NFileOperations::ResolveLink(HWND hwnd, DWORD fFlags, const TCHAR *szLin
 				pShellLink->Resolve(hwnd, fFlags);
 
 				TCHAR szResolvedPathInternal[MAX_PATH];
-				pShellLink->GetPath(szResolvedPathInternal, SIZEOF_ARRAY(szResolvedPathInternal),
+				pShellLink->GetPath(szResolvedPathInternal, std::size(szResolvedPathInternal),
 					nullptr, SLGP_UNCPRIORITY);
 
 				StringCchCopy(szResolvedPath, nBufferSize, szResolvedPathInternal);
@@ -566,7 +491,7 @@ HRESULT NFileOperations::ResolveLink(HWND hwnd, DWORD fFlags, const TCHAR *szLin
 	return hr;
 }
 
-BOOL NFileOperations::CreateBrowseDialog(HWND hOwner, const std::wstring &strTitle,
+BOOL FileOperations::CreateBrowseDialog(HWND hOwner, const std::wstring &strTitle,
 	PIDLIST_ABSOLUTE *ppidl)
 {
 	TCHAR szDisplayName[MAX_PATH];
@@ -598,7 +523,7 @@ BOOL GetFileClusterSize(const std::wstring &strFilename, PLARGE_INTEGER lpRealFi
 	}
 
 	TCHAR szRoot[MAX_PATH];
-	HRESULT hr = StringCchCopy(szRoot, SIZEOF_ARRAY(szRoot), strFilename.c_str());
+	HRESULT hr = StringCchCopy(szRoot, std::size(szRoot), strFilename.c_str());
 
 	if (FAILED(hr))
 	{
@@ -631,7 +556,7 @@ BOOL GetFileClusterSize(const std::wstring &strFilename, PLARGE_INTEGER lpRealFi
 	return TRUE;
 }
 
-void NFileOperations::DeleteFileSecurely(const std::wstring &strFilename,
+void FileOperations::DeleteFileSecurely(const std::wstring &strFilename,
 	OverwriteMethod overwriteMethod)
 {
 	HANDLE hFile;

@@ -4,22 +4,21 @@
 
 #include "stdafx.h"
 #include "CrashHandlerHelper.h"
+#include "App.h"
 #include "ApplicationCrashedDialog.h"
-#include "Explorer++_internal.h"
+#include "CommandLine.h"
 #include "Version.h"
+#include "VersionHelper.h"
 #include "../Helper/DetoursHelper.h"
 #include "../Helper/Helper.h"
-#include "../Helper/Logging.h"
 #include "../Helper/ProcessHelper.h"
-#include "../Helper/StringHelper.h"
-#include <wil/resource.h>
+#include <boost/algorithm/string/join.hpp>
+#include <boost/pfr.hpp>
 #include <detours/detours.h>
+#include <glog/logging.h>
+#include <wil/resource.h>
+#include <DbgHelp.h>
 #include <format>
-
-using MiniDumpWriteDumpType = BOOL(WINAPI *)(HANDLE hProcee, DWORD ProcessId, HANDLE hFile,
-	MINIDUMP_TYPE DumpType, PMINIDUMP_EXCEPTION_INFORMATION ExceptionParam,
-	PMINIDUMP_USER_STREAM_INFORMATION UserStreamParam,
-	PMINIDUMP_CALLBACK_INFORMATION CallbackParam);
 
 LONG WINAPI TopLevelExceptionFilter(EXCEPTION_POINTERS *exception);
 LONG DisableSetUnhandledExceptionFilter();
@@ -44,16 +43,15 @@ void InitializeCrashHandler()
 
 	if (res != NO_ERROR)
 	{
-		assert(false);
-		LOG(warning) << L"Error when attempting to disable SetUnhandledExceptionFilter: " << res;
+		DCHECK(false);
+		LOG(WARNING) << "Error when attempting to disable SetUnhandledExceptionFilter: " << res;
 	}
 }
 
 LONG WINAPI TopLevelExceptionFilter(EXCEPTION_POINTERS *exception)
 {
 	TCHAR currentProcess[MAX_PATH];
-	GetProcessImageName(GetCurrentProcessId(), currentProcess,
-		static_cast<DWORD>(std::size(currentProcess)));
+	GetProcessImageName(GetCurrentProcessId(), currentProcess, std::size(currentProcess));
 
 	// Event names are global in the system. Therefore, the event name used for signaling should be
 	// unique.
@@ -66,10 +64,14 @@ LONG WINAPI TopLevelExceptionFilter(EXCEPTION_POINTERS *exception)
 		return EXCEPTION_CONTINUE_SEARCH;
 	}
 
-	// The order of the arguments here needs to match the order of the arguments in CommandLine.cpp.
-	std::wstring arguments = std::format(L"\"{}\" {} {} {} {} {}", currentProcess,
-		NExplorerplusplus::APPLICATION_CRASHED_ARGUMENT, GetCurrentProcessId(),
-		GetCurrentThreadId(), static_cast<void *>(exception), eventName);
+	CrashedData crashedData;
+	crashedData.processId = GetCurrentProcessId();
+	crashedData.threadId = GetCurrentThreadId();
+	crashedData.exceptionPointersAddress = std::bit_cast<intptr_t>(exception);
+	crashedData.eventName = eventName;
+
+	std::wstring arguments = std::format(L"\"{}\" {} {}", currentProcess,
+		CommandLine::APPLICATION_CRASHED_ARGUMENT, FormatCrashedDataForCommandLine(crashedData));
 
 	STARTUPINFO startupInfo = { 0 };
 	startupInfo.cb = sizeof(startupInfo);
@@ -88,6 +90,14 @@ LONG WINAPI TopLevelExceptionFilter(EXCEPTION_POINTERS *exception)
 	event.wait(30000);
 
 	return EXCEPTION_EXECUTE_HANDLER;
+}
+
+std::wstring FormatCrashedDataForCommandLine(const CrashedData &crashedData)
+{
+	std::vector<std::wstring> fields;
+	boost::pfr::for_each_field(crashedData,
+		[&fields](const auto &field) { fields.push_back(std::format(L"{}", field)); });
+	return boost::algorithm::join(fields, L" ");
 }
 
 LONG DisableSetUnhandledExceptionFilter()
@@ -122,7 +132,7 @@ void HandleProcessCrashedNotification(const CrashedData &crashedData)
 std::optional<std::wstring> CreateMiniDumpForCrashedProcess(const CrashedData &crashedData)
 {
 	wil::unique_event_nothrow event;
-	bool res = event.try_open(utf8StrToWstr(crashedData.eventName).c_str());
+	bool res = event.try_open(crashedData.eventName.c_str());
 
 	if (!res)
 	{
@@ -151,24 +161,6 @@ std::optional<std::wstring> CreateMiniDumpForCrashedProcess(const CrashedData &c
 		return std::nullopt;
 	}
 
-	EXCEPTION_POINTERS *exceptionAddress =
-		reinterpret_cast<EXCEPTION_POINTERS *>(crashedData.exceptionPointersAddress);
-
-	wil::unique_hmodule dbgHelp(LoadLibrary(_T("Dbghelp.dll")));
-
-	if (!dbgHelp)
-	{
-		return std::nullopt;
-	}
-
-	auto miniDumpWriteDump =
-		reinterpret_cast<MiniDumpWriteDumpType>(GetProcAddress(dbgHelp.get(), "MiniDumpWriteDump"));
-
-	if (!miniDumpWriteDump)
-	{
-		return std::nullopt;
-	}
-
 	TCHAR fullPath[MAX_PATH];
 	DWORD pathRes = GetTempPath(static_cast<DWORD>(std::size(fullPath)), fullPath);
 
@@ -181,10 +173,10 @@ std::optional<std::wstring> CreateMiniDumpForCrashedProcess(const CrashedData &c
 	GetLocalTime(&localTime);
 
 	TCHAR fileName[MAX_PATH];
-	HRESULT hr =
-		StringCchPrintf(fileName, std::size(fileName), _T("%s%s-%02d%02d%04d-%02d%02d%02d.dmp"),
-			NExplorerplusplus::APP_NAME, VERSION_STRING_W, localTime.wDay, localTime.wMonth,
-			localTime.wYear, localTime.wHour, localTime.wMinute, localTime.wSecond);
+	HRESULT hr = StringCchPrintf(fileName, std::size(fileName),
+		_T("%s%s-%02d%02d%04d-%02d%02d%02d.dmp"), App::APP_NAME,
+		VersionHelper::GetVersion().GetString().c_str(), localTime.wDay, localTime.wMonth,
+		localTime.wYear, localTime.wHour, localTime.wMinute, localTime.wSecond);
 
 	if (FAILED(hr))
 	{
@@ -208,9 +200,10 @@ std::optional<std::wstring> CreateMiniDumpForCrashedProcess(const CrashedData &c
 
 	MINIDUMP_EXCEPTION_INFORMATION mei;
 	mei.ThreadId = crashedData.threadId;
-	mei.ExceptionPointers = exceptionAddress;
+	mei.ExceptionPointers =
+		std::bit_cast<EXCEPTION_POINTERS *>(crashedData.exceptionPointersAddress);
 	mei.ClientPointers = true;
-	res = miniDumpWriteDump(process.get(), crashedData.processId, file.get(), MiniDumpNormal, &mei,
+	res = MiniDumpWriteDump(process.get(), crashedData.processId, file.get(), MiniDumpNormal, &mei,
 		nullptr, nullptr);
 
 	if (!res)

@@ -35,13 +35,13 @@ private:
 	void SaveExtraXMLSettings(IXMLDOMDocument *pXMLDom, IXMLDOMElement *pParentNode) override;
 	void LoadExtraXMLSettings(BSTR bstrName, BSTR bstrValue) override;
 
-	NFileOperations::OverwriteMethod m_overwriteMethod;
+	FileOperations::OverwriteMethod m_overwriteMethod;
 };
 
 class DestroyFilesDialog : public ThemedDialog
 {
 public:
-	DestroyFilesDialog(HINSTANCE resourceInstance, HWND hParent,
+	DestroyFilesDialog(HINSTANCE resourceInstance, HWND hParent, ThemeManager *themeManager,
 		const std::list<std::wstring> &FullFilenameList, BOOL bShowFriendlyDates);
 
 protected:

@@ -4,19 +4,29 @@
 
 #pragma once
 
-#include "Config.h"
+#include "CrashHandlerHelper.h"
 #include "Feature.h"
+#include "ShellChangeNotificationType.h"
+#include "../Helper/SetDefaultFileManager.h"
 #include <optional>
 #include <variant>
 
 namespace CommandLine
 {
+
 struct Settings
 {
-	std::set<Feature> enableFeatures;
+	bool enableLogging = false;
+	std::set<Feature> featuresToEnable;
 	std::optional<ShellChangeNotificationType> shellChangeNotificationType;
 	std::wstring language;
-	bool createJumplistTab = false;
+	bool clearRegistrySettings = false;
+	bool removeAsDefault = false;
+	DefaultFileManager::ReplaceExplorerMode replaceExplorerMode =
+		DefaultFileManager::ReplaceExplorerMode::None;
+	bool jumplistNewTab = false;
+	std::optional<CrashedData> crashedData;
+	std::optional<std::wstring> pasteSymLinksDestination;
 	std::vector<std::wstring> filesToSelect;
 	std::vector<std::wstring> directories;
 };
@@ -26,5 +36,11 @@ struct ExitInfo
 	int exitCode;
 };
 
-std::variant<Settings, ExitInfo> ProcessCommandLine();
+// Internal command line arguments.
+const wchar_t JUMPLIST_TASK_NEWTAB_ARGUMENT[] = L"--open-new-tab";
+const wchar_t APPLICATION_CRASHED_ARGUMENT[] = L"--application-crashed";
+const wchar_t PASTE_SYMLINKS_ARGUMENT[] = L"--paste-symlinks";
+
+std::variant<Settings, ExitInfo> Parse(const std::wstring &commandLine);
+
 }

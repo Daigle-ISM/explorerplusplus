@@ -6,26 +6,27 @@
 
 #include <boost/signals2.hpp>
 
+class App;
 class CoreInterface;
 class Tab;
-class TabContainer;
+class TabContainerImpl;
 
 class UiTheming
 {
 public:
-	UiTheming(CoreInterface *coreInterface, TabContainer *tabContainer);
+	UiTheming(App *app, CoreInterface *coreInterface, TabContainerImpl *tabContainerImpl);
 
 	bool SetListViewColors(COLORREF backgroundColor, COLORREF textColor);
 	void SetTreeViewColors(COLORREF backgroundColor, COLORREF textColor);
 
 private:
-	void OnTabCreated(int tabId, BOOL switchToNewTab);
+	void OnTabCreated(const Tab &tab, bool selected);
 
 	bool ApplyListViewColorsForAllTabs(COLORREF backgroundColor, COLORREF textColor);
 	bool ApplyListViewColorsForTab(const Tab &tab, COLORREF backgroundColor, COLORREF textColor);
 
 	CoreInterface *m_coreInterface;
-	TabContainer *m_tabContainer;
+	TabContainerImpl *m_tabContainerImpl;
 
 	std::vector<boost::signals2::scoped_connection> m_connections;
 

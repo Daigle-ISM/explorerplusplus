@@ -6,19 +6,18 @@
 #include "Bookmarks/UI/BookmarkTreeView.h"
 #include "Bookmarks/BookmarkDataExchange.h"
 #include "Bookmarks/BookmarkTree.h"
-#include "CoreInterface.h"
 #include "MainResource.h"
 #include "ResourceHelper.h"
 #include "../Helper/DpiCompatibility.h"
 #include "../Helper/DropSourceImpl.h"
-#include "../Helper/Macros.h"
 #include "../Helper/MenuHelper.h"
 #include "../Helper/WindowHelper.h"
 #include <boost/range/adaptor/filtered.hpp>
+#include <glog/logging.h>
 #include <wil/com.h>
 
 BookmarkTreeView::BookmarkTreeView(HWND hTreeView, HINSTANCE resourceInstance,
-	CoreInterface *coreInterface, BookmarkTree *bookmarkTree,
+	const IconResourceLoader *iconResourceLoader, BookmarkTree *bookmarkTree,
 	const std::unordered_set<std::wstring> &setExpansion,
 	std::optional<std::wstring> guidSelected) :
 	BookmarkDropTargetWindow(hTreeView, bookmarkTree),
@@ -27,9 +26,9 @@ BookmarkTreeView::BookmarkTreeView(HWND hTreeView, HINSTANCE resourceInstance,
 	m_bookmarkTree(bookmarkTree),
 	m_bNewFolderCreated(false)
 {
-	m_windowSubclasses.push_back(std::make_unique<WindowSubclassWrapper>(hTreeView,
+	m_windowSubclasses.push_back(std::make_unique<WindowSubclass>(hTreeView,
 		std::bind_front(&BookmarkTreeView::TreeViewProc, this)));
-	m_windowSubclasses.push_back(std::make_unique<WindowSubclassWrapper>(GetParent(hTreeView),
+	m_windowSubclasses.push_back(std::make_unique<WindowSubclass>(GetParent(hTreeView),
 		std::bind_front(&BookmarkTreeView::TreeViewParentProc, this)));
 
 	auto &dpiCompat = DpiCompatibility::GetInstance();
@@ -37,7 +36,7 @@ BookmarkTreeView::BookmarkTreeView(HWND hTreeView, HINSTANCE resourceInstance,
 	int iconWidth = dpiCompat.GetSystemMetricsForDpi(SM_CXSMICON, dpi);
 	int iconHeight = dpiCompat.GetSystemMetricsForDpi(SM_CYSMICON, dpi);
 	std::tie(m_imageList, m_imageListMappings) = ResourceHelper::CreateIconImageList(
-		coreInterface->GetIconResourceLoader(), iconWidth, iconHeight, { Icon::Folder });
+		iconResourceLoader, iconWidth, iconHeight, { Icon::Folder });
 	TreeView_SetImageList(hTreeView, m_imageList.get(), TVSIL_NORMAL);
 
 	SetupTreeView(setExpansion, guidSelected);
@@ -195,7 +194,7 @@ HTREEITEM BookmarkTreeView::InsertFolderIntoTreeView(HTREEITEM hParent,
 	BookmarkItem *bookmarkFolder, int position)
 {
 	TCHAR szText[256];
-	StringCchCopy(szText, SIZEOF_ARRAY(szText), bookmarkFolder->GetName().c_str());
+	StringCchCopy(szText, std::size(szText), bookmarkFolder->GetName().c_str());
 
 	int nChildren = 0;
 
@@ -287,10 +286,10 @@ void BookmarkTreeView::OnBookmarkItemUpdated(BookmarkItem &bookmarkItem,
 	}
 
 	auto itr = m_mapItem.find(bookmarkItem.GetGUID());
-	assert(itr != m_mapItem.end());
+	CHECK(itr != m_mapItem.end());
 
 	TCHAR name[256];
-	StringCchCopy(name, SIZEOF_ARRAY(name), bookmarkItem.GetName().c_str());
+	StringCchCopy(name, std::size(name), bookmarkItem.GetName().c_str());
 
 	TVITEM tvi;
 	tvi.mask = TVIF_TEXT;
@@ -319,7 +318,7 @@ void BookmarkTreeView::OnBookmarkItemMoved(BookmarkItem *bookmarkItem,
 HTREEITEM BookmarkTreeView::AddNewFolderToTreeView(BookmarkItem *bookmarkFolder)
 {
 	auto parentItr = m_mapItem.find(bookmarkFolder->GetParent()->GetGUID());
-	assert(parentItr != m_mapItem.end());
+	CHECK(parentItr != m_mapItem.end());
 
 	size_t relativeIndex = GetFolderRelativeIndex(bookmarkFolder);
 
@@ -346,7 +345,7 @@ HTREEITEM BookmarkTreeView::AddNewFolderToTreeView(BookmarkItem *bookmarkFolder)
 // in the treeview (i.e. it only takes into account other bookmark folders).
 size_t BookmarkTreeView::GetFolderRelativeIndex(BookmarkItem *bookmarkFolder) const
 {
-	assert(bookmarkFolder->IsFolder());
+	DCHECK(bookmarkFolder->IsFolder());
 
 	size_t index = bookmarkFolder->GetParent()->GetChildIndex(bookmarkFolder);
 	auto &children = bookmarkFolder->GetParent()->GetChildren();
@@ -371,12 +370,12 @@ void BookmarkTreeView::OnBookmarkItemPreRemoval(BookmarkItem &bookmarkItem)
 void BookmarkTreeView::RemoveBookmarkItem(const BookmarkItem *bookmarkItem)
 {
 	auto itr = m_mapItem.find(bookmarkItem->GetGUID());
-	assert(itr != m_mapItem.end());
+	CHECK(itr != m_mapItem.end());
 
 	TreeView_DeleteItem(m_hTreeView, itr->second);
 
 	auto parentItr = m_mapItem.find(bookmarkItem->GetParent()->GetGUID());
-	assert(parentItr != m_mapItem.end());
+	CHECK(parentItr != m_mapItem.end());
 
 	auto firstChild = TreeView_GetChild(m_hTreeView, parentItr->second);
 
@@ -547,8 +546,7 @@ void BookmarkTreeView::CreateNewFolder()
 	m_NewFolderGUID = newBookmarkFolder->GetGUID();
 
 	auto hSelectedItem = TreeView_GetSelection(m_hTreeView);
-
-	assert(hSelectedItem != nullptr);
+	DCHECK_NOTNULL(hSelectedItem);
 
 	auto bookmarkFolder = GetBookmarkFolderFromTreeView(hSelectedItem);
 	m_bookmarkTree->AddBookmarkItem(bookmarkFolder, std::move(newBookmarkFolder),
@@ -558,8 +556,7 @@ void BookmarkTreeView::CreateNewFolder()
 void BookmarkTreeView::SelectFolder(const std::wstring &guid)
 {
 	auto itr = m_mapItem.find(guid);
-
-	assert(itr != m_mapItem.end());
+	CHECK(itr != m_mapItem.end());
 
 	TreeView_SelectItem(m_hTreeView, itr->second);
 }

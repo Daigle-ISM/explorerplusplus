@@ -4,196 +4,27 @@
 
 #include "stdafx.h"
 #include "Explorer++.h"
+#include "App.h"
+#include "ColumnStorage.h"
 #include "Config.h"
 #include "DisplayWindow/DisplayWindow.h"
-#include "Explorer++_internal.h"
 #include "MainResource.h"
+#include "ResourceHelper.h"
 #include "SelectColumnsDialog.h"
-#include "ShellBrowser/ShellBrowser.h"
+#include "ShellBrowser/ShellBrowserImpl.h"
 #include "ShellTreeView/ShellTreeView.h"
-#include "TabContainer.h"
+#include "TabContainerImpl.h"
+#include "TabStorage.h"
 #include "../Helper/Controls.h"
 #include "../Helper/FileOperations.h"
-#include "../Helper/Logging.h"
-#include "../Helper/Macros.h"
 #include "../Helper/WindowHelper.h"
 #include <boost/range/adaptor/map.hpp>
-
-void Explorerplusplus::ValidateLoadedSettings()
-{
-	if (m_config->displayWindowWidth < DISPLAY_WINDOW_MINIMUM_WIDTH)
-	{
-		m_config->displayWindowWidth = Config::DEFAULT_DISPLAYWINDOW_WIDTH;
-	}
-
-	if (m_config->displayWindowHeight < DISPLAY_WINDOW_MINIMUM_HEIGHT)
-	{
-		m_config->displayWindowHeight = Config::DEFAULT_DISPLAYWINDOW_HEIGHT;
-	}
-
-	ValidateColumns(m_config->globalFolderSettings.folderColumns);
-}
-
-void Explorerplusplus::ValidateColumns(FolderColumns &folderColumns)
-{
-	ValidateSingleColumnSet(VALIDATE_REALFOLDER_COLUMNS, folderColumns.realFolderColumns);
-	ValidateSingleColumnSet(VALIDATE_CONTROLPANEL_COLUMNS, folderColumns.controlPanelColumns);
-	ValidateSingleColumnSet(VALIDATE_MYCOMPUTER_COLUMNS, folderColumns.myComputerColumns);
-	ValidateSingleColumnSet(VALIDATE_RECYCLEBIN_COLUMNS, folderColumns.recycleBinColumns);
-	ValidateSingleColumnSet(VALIDATE_PRINTERS_COLUMNS, folderColumns.printersColumns);
-	ValidateSingleColumnSet(VALIDATE_NETWORKCONNECTIONS_COLUMNS,
-		folderColumns.networkConnectionsColumns);
-	ValidateSingleColumnSet(VALIDATE_MYNETWORKPLACES_COLUMNS, folderColumns.myNetworkPlacesColumns);
-}
-
-void Explorerplusplus::ValidateSingleColumnSet(int iColumnSet, std::vector<Column_t> &columns)
-{
-	Column_t column;
-	BOOL bFound = FALSE;
-	const Column_t *pColumns = nullptr;
-	unsigned int iTotalColumnSize = 0;
-	unsigned int i = 0;
-
-	switch (iColumnSet)
-	{
-	case VALIDATE_REALFOLDER_COLUMNS:
-		iTotalColumnSize = SIZEOF_ARRAY(REAL_FOLDER_DEFAULT_COLUMNS);
-		pColumns = REAL_FOLDER_DEFAULT_COLUMNS;
-		break;
-
-	case VALIDATE_CONTROLPANEL_COLUMNS:
-		iTotalColumnSize = SIZEOF_ARRAY(CONTROL_PANEL_DEFAULT_COLUMNS);
-		pColumns = CONTROL_PANEL_DEFAULT_COLUMNS;
-		break;
-
-	case VALIDATE_MYCOMPUTER_COLUMNS:
-		iTotalColumnSize = SIZEOF_ARRAY(MY_COMPUTER_DEFAULT_COLUMNS);
-		pColumns = MY_COMPUTER_DEFAULT_COLUMNS;
-		break;
-
-	case VALIDATE_RECYCLEBIN_COLUMNS:
-		iTotalColumnSize = SIZEOF_ARRAY(RECYCLE_BIN_DEFAULT_COLUMNS);
-		pColumns = RECYCLE_BIN_DEFAULT_COLUMNS;
-		break;
-
-	case VALIDATE_PRINTERS_COLUMNS:
-		iTotalColumnSize = SIZEOF_ARRAY(PRINTERS_DEFAULT_COLUMNS);
-		pColumns = PRINTERS_DEFAULT_COLUMNS;
-		break;
-
-	case VALIDATE_NETWORKCONNECTIONS_COLUMNS:
-		iTotalColumnSize = SIZEOF_ARRAY(NETWORK_CONNECTIONS_DEFAULT_COLUMNS);
-		pColumns = NETWORK_CONNECTIONS_DEFAULT_COLUMNS;
-		break;
-
-	case VALIDATE_MYNETWORKPLACES_COLUMNS:
-		iTotalColumnSize = SIZEOF_ARRAY(MY_NETWORK_PLACES_DEFAULT_COLUMNS);
-		pColumns = MY_NETWORK_PLACES_DEFAULT_COLUMNS;
-		break;
-	}
-
-	/* Check that every column that is supposed to appear
-	is in the column list. */
-	for (i = 0; i < iTotalColumnSize; i++)
-	{
-		bFound = FALSE;
-
-		for (auto itr = columns.begin(); itr != columns.end(); itr++)
-		{
-			if (itr->type == pColumns[i].type)
-			{
-				bFound = TRUE;
-				break;
-			}
-		}
-
-		/* The column is not currently in the set. Add it in. */
-		if (!bFound)
-		{
-			column.type = pColumns[i].type;
-			column.bChecked = pColumns[i].bChecked;
-			column.iWidth = DEFAULT_COLUMN_WIDTH;
-			columns.push_back(column);
-		}
-	}
-
-	/* Check that no unknown column types appear in the column list. */
-	for (auto itr = columns.cbegin(); itr != columns.cend();)
-	{
-		bFound = FALSE;
-
-		for (i = 0; i < iTotalColumnSize; i++)
-		{
-			if (itr->type == pColumns[i].type)
-			{
-				bFound = TRUE;
-				break;
-			}
-		}
-
-		if (!bFound)
-		{
-			/* The column is not recognized in the set. Remove it. */
-			itr = columns.erase(itr);
-		}
-		else
-		{
-			++itr;
-		}
-	}
-}
+#include <glog/logging.h>
 
 void Explorerplusplus::ApplyDisplayWindowPosition()
 {
-	SendMessage(m_hDisplayWindow, WM_USER_DISPLAYWINDOWMOVED, m_config->displayWindowVertical,
-		NULL);
-}
-
-void Explorerplusplus::ApplyToolbarSettings()
-{
-	BOOL bVisible = FALSE;
-	int i = 0;
-
-	/* Set the state of the toolbars contained within
-	the main rebar. */
-	for (i = 0; i < NUM_MAIN_TOOLBARS; i++)
-	{
-		switch (m_ToolbarInformation[i].wID)
-		{
-		case ID_MAINTOOLBAR:
-			bVisible = m_config->showMainToolbar;
-			break;
-
-		case ID_ADDRESSTOOLBAR:
-			bVisible = m_config->showAddressBar;
-			break;
-
-		case ID_BOOKMARKSTOOLBAR:
-			bVisible = m_config->showBookmarksToolbar;
-			break;
-
-		case ID_DRIVESTOOLBAR:
-			bVisible = m_config->showDrivesToolbar;
-			break;
-
-		case ID_APPLICATIONSTOOLBAR:
-			bVisible = m_config->showApplicationToolbar;
-			break;
-		}
-
-		if (!bVisible)
-		{
-			AddStyleToToolbar(&m_ToolbarInformation[i].fStyle, RBBS_HIDDEN);
-		}
-	}
-
-	if (m_config->lockToolbars)
-	{
-		for (i = 0; i < NUM_MAIN_TOOLBARS; i++)
-		{
-			AddStyleToToolbar(&m_ToolbarInformation[i].fStyle, RBBS_NOGRIPPER);
-		}
-	}
+	SendMessage(m_displayWindow->GetHWND(), WM_USER_DISPLAYWINDOWMOVED,
+		m_config->displayWindowVertical, NULL);
 }
 
 void Explorerplusplus::CopyToFolder(bool move)
@@ -220,9 +51,9 @@ void Explorerplusplus::CopyToFolder(bool move)
 		pidlPtrs.push_back(std::move(pidlPtr));
 	}
 
-	TCHAR szTemp[128];
-	LoadString(m_resourceInstance, IDS_GENERAL_COPY_TO_FOLDER_TITLE, szTemp, SIZEOF_ARRAY(szTemp));
-	NFileOperations::CopyFilesToFolder(m_hContainer, szTemp, pidls, move);
+	auto title =
+		ResourceHelper::LoadString(m_app->GetResourceInstance(), IDS_GENERAL_COPY_TO_FOLDER_TITLE);
+	FileOperations::CopyFilesToFolder(m_hContainer, title, pidls, move);
 }
 
 void Explorerplusplus::OnDeviceChange(WPARAM wParam, LPARAM lParam)
@@ -260,17 +91,17 @@ void Explorerplusplus::DirectoryAlteredCallback(const TCHAR *szFileName, DWORD d
 	pDirectoryAltered = (DirectoryAltered *) pData;
 	pContainer = (Explorerplusplus *) pDirectoryAltered->pData;
 
-	Tab *tab =
-		pContainer->GetActivePane()->GetTabContainer()->GetTabOptional(pDirectoryAltered->iIndex);
+	Tab *tab = pContainer->GetActivePane()->GetTabContainerImpl()->GetTabOptional(
+		pDirectoryAltered->iIndex);
 
 	if (tab)
 	{
-		std::wstring directory = tab->GetShellBrowser()->GetDirectory();
-		LOG(debug) << _T("Directory change notification received for \"") << directory
-				   << _T("\", Action = ") << dwAction << _T(", Filename = \"") << szFileName
-				   << _T("\"");
+		std::wstring directory = tab->GetShellBrowserImpl()->GetDirectory();
+		LOG(INFO) << "Directory change notification received for \"" << wstrToUtf8Str(directory)
+				  << "\", Action = " << dwAction << ", Filename = \"" << wstrToUtf8Str(szFileName)
+				  << "\"";
 
-		tab->GetShellBrowser()->FilesModified(dwAction, szFileName, pDirectoryAltered->iIndex,
+		tab->GetShellBrowserImpl()->FilesModified(dwAction, szFileName, pDirectoryAltered->iIndex,
 			pDirectoryAltered->iFolderIndex);
 	}
 }
@@ -306,9 +137,10 @@ void Explorerplusplus::FolderSizeCallback(FolderSizeExtraInfo *pfsei, int nFolde
 
 void Explorerplusplus::OnSelectColumns()
 {
-	SelectColumnsDialog selectColumnsDialog(m_resourceInstance, m_hContainer,
-		GetActivePane()->GetTabContainer()->GetSelectedTab().GetShellBrowser(),
-		m_iconResourceLoader.get());
+	SelectColumnsDialog selectColumnsDialog(m_app->GetResourceInstance(), m_hContainer,
+		m_app->GetThemeManager(),
+		GetActivePane()->GetTabContainerImpl()->GetSelectedTab().GetShellBrowserImpl(),
+		m_app->GetIconResourceLoader());
 	selectColumnsDialog.ShowModalDialog();
 }
 

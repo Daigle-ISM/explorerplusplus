@@ -4,26 +4,79 @@
 
 #include "stdafx.h"
 #include "ListViewHelper.h"
-#include "Macros.h"
+#include "ScopedRedrawDisabler.h"
+#include "WindowHelper.h"
+#include <wil/common.h>
 
 namespace
 {
 
-BOOL GetListViewItem(HWND hListView, LVITEM *pLVItem, UINT mask, UINT stateMask, int iItem,
-	int iSubItem, TCHAR *pszText, int cchMax)
+bool DoesHeaderContainText(HWND listView, const std::wstring &text,
+	StringComparatorFunc stringComparator)
 {
-	pLVItem->mask = mask;
-	pLVItem->stateMask = stateMask;
-	pLVItem->iItem = iItem;
-	pLVItem->iSubItem = iSubItem;
+	HWND header = ListView_GetHeader(listView);
+	int numColumns = Header_GetItemCount(header);
 
-	if (mask & LVIF_TEXT)
+	for (int i = 0; i < numColumns; i++)
 	{
-		pLVItem->pszText = pszText;
-		pLVItem->cchTextMax = cchMax;
+		wchar_t columnText[260];
+
+		LVCOLUMN lvColumn = {};
+		lvColumn.mask = LVCF_TEXT;
+		lvColumn.pszText = columnText;
+		lvColumn.cchTextMax = std::size(columnText);
+		auto res = ListView_GetColumn(listView, i, &lvColumn);
+
+		if (!res)
+		{
+			DCHECK(false);
+			continue;
+		}
+
+		if (stringComparator(columnText, text))
+		{
+			return true;
+		}
 	}
 
-	return ListView_GetItem(hListView, pLVItem);
+	return false;
+}
+
+bool DoesItemRowContainText(HWND listView, int item, const std::wstring &text,
+	StringComparatorFunc stringComparator)
+{
+	HWND header = ListView_GetHeader(listView);
+	int numColumns = Header_GetItemCount(header);
+
+	for (int i = 0; i < numColumns; i++)
+	{
+		auto itemColumnText = ListViewHelper::GetItemText(listView, item, i);
+
+		if (stringComparator(itemColumnText, text))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool DoAnyItemsContainText(HWND listView, const std::wstring &text,
+	StringComparatorFunc stringComparator)
+{
+	int numItems = ListView_GetItemCount(listView);
+
+	for (int i = 0; i < numItems; i++)
+	{
+		bool containsText = DoesItemRowContainText(listView, i, text, stringComparator);
+
+		if (containsText)
+		{
+			return true;
+		}
+	}
+
+	return false;
 }
 
 }
@@ -31,255 +84,128 @@ BOOL GetListViewItem(HWND hListView, LVITEM *pLVItem, UINT mask, UINT stateMask,
 namespace ListViewHelper
 {
 
-void SelectItem(HWND hListView, int iItem, BOOL bSelect)
+void SelectItem(HWND listView, int item, bool select)
 {
-	UINT uNewState;
-
-	if (bSelect)
-	{
-		uNewState = LVIS_SELECTED;
-	}
-	else
-	{
-		uNewState = 0;
-	}
-
-	ListView_SetItemState(hListView, iItem, uNewState, LVIS_SELECTED);
+	UINT updatedState = select ? LVIS_SELECTED : 0;
+	ListView_SetItemState(listView, item, updatedState, LVIS_SELECTED);
 }
 
-void SelectAllItems(HWND hListView, BOOL bSelect)
+void SelectAllItems(HWND listView, bool select)
 {
-	UINT uNewState;
-
-	if (bSelect)
-	{
-		uNewState = LVIS_SELECTED;
-	}
-	else
-	{
-		uNewState = 0;
-	}
-
-	SendMessage(hListView, WM_SETREDRAW, FALSE, 0);
-	ListView_SetItemState(hListView, -1, uNewState, LVIS_SELECTED);
-	SendMessage(hListView, WM_SETREDRAW, TRUE, 0);
+	ScopedRedrawDisabler redrawDisabler(listView);
+	UINT updatedState = select ? LVIS_SELECTED : 0;
+	ListView_SetItemState(listView, -1, updatedState, LVIS_SELECTED);
 }
 
-int InvertSelection(HWND hListView)
+void InvertSelection(HWND listView)
 {
-	int nTotalItems = ListView_GetItemCount(hListView);
+	int numItems = ListView_GetItemCount(listView);
 
-	int nSelected = 0;
+	ScopedRedrawDisabler redrawDisabler(listView);
 
-	SendMessage(hListView, WM_SETREDRAW, FALSE, 0);
-
-	for (int i = 0; i < nTotalItems; i++)
+	for (int i = 0; i < numItems; i++)
 	{
-		if (ListView_GetItemState(hListView, i, LVIS_SELECTED) == LVIS_SELECTED)
+		if (ListView_GetItemState(listView, i, LVIS_SELECTED) == LVIS_SELECTED)
 		{
-			SelectItem(hListView, i, FALSE);
+			SelectItem(listView, i, false);
 		}
 		else
 		{
-			SelectItem(hListView, i, TRUE);
-			nSelected++;
+			SelectItem(listView, i, true);
 		}
 	}
-
-	SendMessage(hListView, WM_SETREDRAW, TRUE, 0);
-
-	return nSelected;
 }
 
-void FocusItem(HWND hListView, int iItem, BOOL bFocus)
+void FocusItem(HWND listView, int item, bool focus)
 {
-	UINT uNewState;
+	UINT updatedState = focus ? LVIS_FOCUSED : 0;
+	ListView_SetItemState(listView, item, updatedState, LVIS_FOCUSED);
+}
 
-	if (bFocus)
+void SetAutoArrange(HWND listView, bool autoArrange)
+{
+	AddWindowStyles(listView, LVS_AUTOARRANGE, autoArrange);
+}
+
+void ActivateOneClickSelect(HWND listView, bool activate, UINT hoverTime)
+{
+	AddRemoveExtendedStyles(listView,
+		LVS_EX_TRACKSELECT | LVS_EX_ONECLICKACTIVATE | LVS_EX_UNDERLINEHOT, activate);
+
+	if (activate)
 	{
-		uNewState = LVIS_FOCUSED;
+		ListView_SetHoverTime(listView, hoverTime);
+	}
+}
+
+void AddRemoveExtendedStyles(HWND listView, DWORD styles, bool add)
+{
+	auto extendedStyle = ListView_GetExtendedListViewStyle(listView);
+
+	if (add)
+	{
+		WI_SetAllFlags(extendedStyle, styles);
 	}
 	else
 	{
-		uNewState = 0;
+		WI_ClearAllFlags(extendedStyle, styles);
 	}
 
-	ListView_SetItemState(hListView, iItem, uNewState, LVIS_FOCUSED);
+	ListView_SetExtendedListViewStyle(listView, extendedStyle);
 }
 
-void SetGridlines(HWND hListView, BOOL bEnableGridlines)
+void SwapItems(HWND listView, int item1, int item2)
 {
-	auto dwExtendedStyle = ListView_GetExtendedListViewStyle(hListView);
+	UINT mask = LVIF_IMAGE | LVIF_INDENT | LVIF_STATE | LVIF_PARAM;
+	auto stateMask = static_cast<UINT>(-1);
 
-	if (bEnableGridlines)
+	LVITEM lvItem1 = {};
+	lvItem1.mask = mask;
+	lvItem1.stateMask = stateMask;
+	lvItem1.iItem = item1;
+	lvItem1.iSubItem = 0;
+	auto res = ListView_GetItem(listView, &lvItem1);
+
+	if (!res)
 	{
-		if ((dwExtendedStyle & LVS_EX_GRIDLINES) != LVS_EX_GRIDLINES)
-		{
-			dwExtendedStyle |= LVS_EX_GRIDLINES;
-		}
-	}
-	else
-	{
-		if ((dwExtendedStyle & LVS_EX_GRIDLINES) == LVS_EX_GRIDLINES)
-		{
-			dwExtendedStyle &= ~LVS_EX_GRIDLINES;
-		}
-	}
-
-	ListView_SetExtendedListViewStyle(hListView, dwExtendedStyle);
-}
-
-BOOL SetAutoArrange(HWND hListView, BOOL bAutoArrange)
-{
-	LONG_PTR lStyle = GetWindowLongPtr(hListView, GWL_STYLE);
-
-	if (lStyle == 0)
-	{
-		return FALSE;
+		DCHECK(false);
+		return;
 	}
 
-	if (bAutoArrange)
+	LVITEM lvItem2 = {};
+	lvItem2.mask = mask;
+	lvItem2.stateMask = stateMask;
+	lvItem2.iItem = item2;
+	lvItem2.iSubItem = 0;
+	res = ListView_GetItem(listView, &lvItem2);
+
+	if (!res)
 	{
-		if ((lStyle & LVS_AUTOARRANGE) != LVS_AUTOARRANGE)
-		{
-			lStyle |= LVS_AUTOARRANGE;
-		}
-	}
-	else
-	{
-		if ((lStyle & LVS_AUTOARRANGE) == LVS_AUTOARRANGE)
-		{
-			lStyle &= ~LVS_AUTOARRANGE;
-		}
+		DCHECK(false);
+		return;
 	}
 
-	SetLastError(0);
-	LONG_PTR lRet = SetWindowLongPtr(hListView, GWL_STYLE, lStyle);
+	ScopedRedrawDisabler redrawDisabler(listView);
 
-	if (lRet == 0 && GetLastError() != 0)
+	lvItem1.iItem = item2;
+	res = ListView_SetItem(listView, &lvItem1);
+	DCHECK(res);
+
+	lvItem2.iItem = item1;
+	res = ListView_SetItem(listView, &lvItem2);
+	DCHECK(res);
+
+	HWND header = ListView_GetHeader(listView);
+	int numColumns = Header_GetItemCount(header);
+
+	for (int i = 0; i < numColumns; i++)
 	{
-		return FALSE;
+		auto item1ColumnText = GetItemText(listView, item1, i);
+		auto item2ColumnText = GetItemText(listView, item2, i);
+
+		ListView_SetItemText(listView, item1, i, item2ColumnText.data());
+		ListView_SetItemText(listView, item2, i, item1ColumnText.data());
 	}
-
-	return TRUE;
-}
-
-void ActivateOneClickSelect(HWND hListView, BOOL bActivate, UINT uHoverTime)
-{
-	auto dwExtendedStyle = ListView_GetExtendedListViewStyle(hListView);
-
-	/* The three styles below are used to control one-click
-	selection. */
-	if (bActivate)
-	{
-		if ((dwExtendedStyle & LVS_EX_TRACKSELECT) != LVS_EX_TRACKSELECT)
-		{
-			dwExtendedStyle |= LVS_EX_TRACKSELECT;
-		}
-
-		if ((dwExtendedStyle & LVS_EX_ONECLICKACTIVATE) != LVS_EX_ONECLICKACTIVATE)
-		{
-			dwExtendedStyle |= LVS_EX_ONECLICKACTIVATE;
-		}
-
-		if ((dwExtendedStyle & LVS_EX_UNDERLINEHOT) != LVS_EX_UNDERLINEHOT)
-		{
-			dwExtendedStyle |= LVS_EX_UNDERLINEHOT;
-		}
-
-		ListView_SetExtendedListViewStyle(hListView, dwExtendedStyle);
-		ListView_SetHoverTime(hListView, uHoverTime);
-	}
-	else
-	{
-		if ((dwExtendedStyle & LVS_EX_TRACKSELECT) == LVS_EX_TRACKSELECT)
-		{
-			dwExtendedStyle &= ~LVS_EX_TRACKSELECT;
-		}
-
-		if ((dwExtendedStyle & LVS_EX_ONECLICKACTIVATE) == LVS_EX_ONECLICKACTIVATE)
-		{
-			dwExtendedStyle &= ~LVS_EX_ONECLICKACTIVATE;
-		}
-
-		if ((dwExtendedStyle & LVS_EX_UNDERLINEHOT) == LVS_EX_UNDERLINEHOT)
-		{
-			dwExtendedStyle &= ~LVS_EX_UNDERLINEHOT;
-		}
-
-		ListView_SetExtendedListViewStyle(hListView, dwExtendedStyle);
-	}
-}
-
-void AddRemoveExtendedStyle(HWND hListView, DWORD dwStyle, BOOL bAdd)
-{
-	auto dwExtendedStyle = ListView_GetExtendedListViewStyle(hListView);
-
-	if (bAdd)
-	{
-		if ((dwExtendedStyle & dwStyle) != dwStyle)
-		{
-			dwExtendedStyle |= dwStyle;
-		}
-	}
-	else
-	{
-		if ((dwExtendedStyle & dwStyle) == dwStyle)
-		{
-			dwExtendedStyle &= ~dwStyle;
-		}
-	}
-
-	ListView_SetExtendedListViewStyle(hListView, dwExtendedStyle);
-}
-
-BOOL SwapItems(HWND hListView, int iItem1, int iItem2, BOOL bSwapLPARAM)
-{
-	UINT mask = LVIF_IMAGE | LVIF_INDENT | LVIF_STATE | LVIF_TEXT;
-	UINT stateMask = static_cast<UINT>(-1);
-
-	if (bSwapLPARAM)
-	{
-		mask |= LVIF_PARAM;
-	}
-
-	LVITEM lvItem1;
-	TCHAR szText1[512];
-	BOOL bRet1 = GetListViewItem(hListView, &lvItem1, mask, stateMask, iItem1, 0, szText1,
-		SIZEOF_ARRAY(szText1));
-
-	LVITEM lvItem2;
-	TCHAR szText2[512];
-	BOOL bRet2 = GetListViewItem(hListView, &lvItem2, mask, stateMask, iItem2, 0, szText2,
-		SIZEOF_ARRAY(szText2));
-
-	if (!bRet1 || !bRet2)
-	{
-		return FALSE;
-	}
-
-	lvItem1.iItem = iItem2;
-	ListView_SetItem(hListView, &lvItem1);
-
-	lvItem2.iItem = iItem1;
-	ListView_SetItem(hListView, &lvItem2);
-
-	HWND hHeader = ListView_GetHeader(hListView);
-	int nColumns = Header_GetItemCount(hHeader);
-
-	for (int i = 1; i < nColumns; i++)
-	{
-		TCHAR szColumn1[512];
-		ListView_GetItemText(hListView, iItem1, i, szColumn1, SIZEOF_ARRAY(szColumn1));
-
-		TCHAR szColumn2[512];
-		ListView_GetItemText(hListView, iItem2, i, szColumn2, SIZEOF_ARRAY(szColumn2));
-
-		ListView_SetItemText(hListView, iItem1, i, szColumn2);
-		ListView_SetItemText(hListView, iItem2, i, szColumn1);
-	}
-
-	return TRUE;
 }
 
 void PositionInsertMark(HWND hListView, const POINT *ppt)
@@ -428,6 +354,59 @@ std::optional<int> GetLastSelectedItemIndex(HWND listView)
 	}
 
 	return lastItemIndex;
+}
+
+std::wstring GetItemText(HWND listView, int item, int subItem)
+{
+	std::wstring text;
+	text.resize(260);
+
+	while (true)
+	{
+		LVITEM lvItem = {};
+		lvItem.iSubItem = subItem;
+		lvItem.pszText = text.data();
+		lvItem.cchTextMax = static_cast<int>(text.size());
+		auto length = static_cast<int>(
+			SendMessage(listView, LVM_GETITEMTEXT, item, reinterpret_cast<LPARAM>(&lvItem)));
+
+		if (static_cast<size_t>(length) < (text.size() - 1))
+		{
+			text.resize(length);
+			break;
+		}
+	}
+
+	return text;
+}
+
+bool DoesListViewContainText(HWND listView, const std::wstring &text,
+	StringComparatorFunc stringComparator)
+{
+	if (DoesHeaderContainText(listView, text, stringComparator))
+	{
+		return true;
+	}
+
+	if (DoAnyItemsContainText(listView, text, stringComparator))
+	{
+		return true;
+	}
+
+	return false;
+}
+
+std::set<int> GetSelectedItems(HWND listView)
+{
+	std::set<int> selectedItems;
+	int index = -1;
+
+	while ((index = ListView_GetNextItem(listView, index, LVNI_SELECTED)) != -1)
+	{
+		selectedItems.insert(index);
+	}
+
+	return selectedItems;
 }
 
 }

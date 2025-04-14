@@ -4,103 +4,101 @@
 
 #pragma once
 
-#include "BetterEnumsWrapper.h"
 #include "CustomFont.h"
 #include "DefaultColumns.h"
+#include "DisplayWindowDefaults.h"
+#include "FontHelper.h"
 #include "IconResourceLoader.h"
+#include "LanguageHelper.h"
 #include "ShellBrowser/FolderSettings.h"
 #include "ShellBrowser/ViewModes.h"
+#include "ShellChangeNotificationType.h"
 #include "Theme.h"
 #include "ValueWrapper.h"
+#include "../Helper/BetterEnumsWrapper.h"
 #include "../Helper/SetDefaultFileManager.h"
 #include "../Helper/ShellHelper.h"
 #include "../Helper/StringHelper.h"
 #include <optional>
 
-enum class InfoTipType
-{
+// clang-format off
+BETTER_ENUM(InfoTipType, int,
 	System = 0,
 	Custom = 1
-};
+)
+// clang-format on
 
-enum class ShellChangeNotificationType
-{
-	Disabled,
-	NonFilesystem,
-	All
-};
-
-// These values are used to save/load configuration data and should not be
-// changed.
-enum class StartupMode
-{
+// These values are used to save/load configuration data. Existing values shouldn't be changed.
+// clang-format off
+BETTER_ENUM(StartupMode, int,
 	PreviousTabs = 1,
-	DefaultFolder = 2
-};
+	DefaultFolder = 2,
+	CustomFolders = 3
+)
+// clang-format on
 
+// Holds application-wide configuration options. Options that are specific to a window or tab should
+// instead be stored in their associated class.
 struct Config
 {
-	static const UINT DEFAULT_DISPLAYWINDOW_WIDTH = 300;
-	static const UINT DEFAULT_DISPLAYWINDOW_HEIGHT = 90;
-
-	static const UINT DEFAULT_TREEVIEW_WIDTH = 208;
-
-	DWORD language = LANG_ENGLISH;
+	LANGID language = LanguageHelper::DEFAULT_LANGUAGE;
 	IconSet iconSet = IconSet::Color;
-	ValueWrapper<Theme> theme = Theme::Light;
-	StartupMode startupMode = StartupMode::PreviousTabs;
+	ValueWrapper<Theme> theme = +Theme::Light;
 	std::wstring defaultTabDirectory = GetComputerFolderPath();
 	const std::wstring defaultTabDirectoryStatic = GetComputerFolderPath();
 	bool dualPane = false;
-	BOOL showStatusBar = TRUE;
-	ValueWrapper<bool> showFolders = true;
-	BOOL showAddressBar = TRUE;
-	BOOL showDisplayWindow = TRUE;
-	BOOL showMainToolbar = TRUE;
-	BOOL showBookmarksToolbar = FALSE;
-	BOOL showDrivesToolbar = TRUE;
-	BOOL showApplicationToolbar = FALSE;
-	BOOL alwaysOpenNewTab = FALSE;
-	BOOL openNewTabNextToCurrent = FALSE;
-	BOOL lockToolbars = TRUE;
-	BOOL treeViewDelayEnabled = FALSE;
-	BOOL treeViewAutoExpandSelected = FALSE;
-	BOOL showTaskbarThumbnails = TRUE;
-	ValueWrapper<BOOL> useFullRowSelect = FALSE;
-	BOOL showFilePreviews = TRUE;
-	BOOL allowMultipleInstances = TRUE;
-	BOOL doubleClickTabClose = TRUE;
-	ValueWrapper<BOOL> useLargeToolbarIcons = FALSE;
-	BOOL handleZipFiles = FALSE;
-	BOOL overwriteExistingFilesConfirmation = TRUE;
-	ValueWrapper<BOOL> checkBoxSelection = FALSE;
-	BOOL closeMainWindowOnTabClose = TRUE;
-	BOOL confirmCloseTabs = FALSE;
-	BOOL synchronizeTreeview = TRUE;
-	LONG displayWindowWidth = DEFAULT_DISPLAYWINDOW_WIDTH;
-	LONG displayWindowHeight = DEFAULT_DISPLAYWINDOW_HEIGHT;
-	BOOL displayWindowVertical = FALSE;
-	int treeViewWidth = DEFAULT_TREEVIEW_WIDTH;
+	bool showStatusBar = true;
+	ValueWrapper<bool> showDisplayWindow = true;
+	bool alwaysOpenNewTab = false;
+	bool openNewTabNextToCurrent = false;
+	bool treeViewDelayEnabled = false;
+	bool treeViewAutoExpandSelected = false;
+	bool showTaskbarThumbnails = false;
+	ValueWrapper<bool> useFullRowSelect = false;
+	bool showFilePreviews = true;
+	bool allowMultipleInstances = true;
+	bool doubleClickTabClose = true;
+	ValueWrapper<bool> useLargeToolbarIcons = false;
+	bool handleZipFiles = false;
+	bool overwriteExistingFilesConfirmation = true;
+	ValueWrapper<bool> checkBoxSelection = false;
+	bool closeMainWindowOnTabClose = true;
+	bool confirmCloseTabs = false;
+	ValueWrapper<bool> synchronizeTreeview = true;
+	bool displayWindowVertical = false;
 	ShellChangeNotificationType shellChangeNotificationType = ShellChangeNotificationType::All;
 	bool goUpOnDoubleClick = true;
 
 	DefaultFileManager::ReplaceExplorerMode replaceExplorerMode =
 		DefaultFileManager::ReplaceExplorerMode::None;
 
-	BOOL showInfoTips = TRUE;
+	bool showInfoTips = true;
 	InfoTipType infoTipType = InfoTipType::System;
 
 	ValueWrapper<std::optional<CustomFont>> mainFont;
 
+	// Startup
+	StartupMode startupMode = StartupMode::PreviousTabs;
+	std::vector<std::wstring> startupFolders; // Only relevant for StartupMode::CustomFolders.
+
 	// Main window
-	ValueWrapper<BOOL> showFullTitlePath = FALSE;
-	ValueWrapper<BOOL> showUserNameInTitleBar = FALSE;
-	ValueWrapper<BOOL> showPrivilegeLevelInTitleBar = FALSE;
+	ValueWrapper<bool> showFullTitlePath = false;
+	ValueWrapper<bool> showUserNameInTitleBar = false;
+	ValueWrapper<bool> showPrivilegeLevelInTitleBar = false;
+
+	// Toolbar display settings
+	ValueWrapper<bool> showFolders = true;
+	ValueWrapper<bool> showAddressBar = true;
+	ValueWrapper<bool> showMainToolbar = true;
+	ValueWrapper<bool> showBookmarksToolbar = false;
+	ValueWrapper<bool> showDrivesToolbar = true;
+	ValueWrapper<bool> showApplicationToolbar = false;
+	ValueWrapper<bool> lockToolbars = true;
 
 	// Tabs
-	ValueWrapper<BOOL> alwaysShowTabBar = TRUE;
-	ValueWrapper<BOOL> showTabBarAtBottom = FALSE;
-	ValueWrapper<BOOL> extendTabControl = FALSE;
+	ValueWrapper<bool> alwaysShowTabBar = true;
+	ValueWrapper<bool> showTabBarAtBottom = false;
+	ValueWrapper<bool> extendTabControl = false;
 	bool openTabsInForeground = false;
 
 	// Treeview
@@ -108,18 +106,19 @@ struct Config
 	ValueWrapper<bool> showQuickAccessInTreeView = true;
 
 	// Display window
-	Gdiplus::Color displayWindowCentreColor = Gdiplus::Color(255, 255, 255);
-	Gdiplus::Color displayWindowSurroundColor = Gdiplus::Color(0, 94, 138);
-	COLORREF displayWindowTextColor = RGB(0, 0, 0);
-	HFONT displayWindowFont = CreateFont(-13, 0, 0, 0, FW_MEDIUM, FALSE, FALSE, FALSE,
-		DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, PROOF_QUALITY,
-		FIXED_PITCH | FF_MODERN, _T("Segoe UI"));
+	ValueWrapper<COLORREF> displayWindowCentreColor = DisplayWindowDefaults::CENTRE_COLOR;
+	ValueWrapper<COLORREF> displayWindowSurroundColor = DisplayWindowDefaults::SURROUND_COLOR;
+	ValueWrapper<COLORREF> displayWindowTextColor = DisplayWindowDefaults::TEXT_COLOR;
+	ValueWrapper<LOGFONT> displayWindowFont = DisplayWindowDefaults::FONT;
 
 	// These are settings that are shared between all tabs. It's not
 	// possible to adjust them on a per-tab basis.
 	GlobalFolderSettings globalFolderSettings;
 
 	FolderSettings defaultFolderSettings;
+
+	// This is only used in tests.
+	bool operator==(const Config &) const = default;
 
 private:
 	static std::wstring GetComputerFolderPath()

@@ -4,13 +4,22 @@
 
 #include "stdafx.h"
 #include "Explorer++.h"
+#include "AcceleratorHelper.h"
+#include "App.h"
 #include "Bookmarks/UI/BookmarksMainMenu.h"
 #include "FeatureList.h"
+#include "FrequentLocationsMenu.h"
+#include "HistoryMenu.h"
 #include "Icon.h"
+#include "MainMenuSubMenuView.h"
 #include "MainResource.h"
+#include "MenuRanges.h"
 #include "ResourceHelper.h"
+#include "TabRestorerMenu.h"
 #include "../Helper/DpiCompatibility.h"
+#include "../Helper/ImageHelper.h"
 #include "../Helper/MenuHelper.h"
+#include "../Helper/ProcessHelper.h"
 #include "../Helper/ShellHelper.h"
 #include <wil/resource.h>
 #include <map>
@@ -46,7 +55,7 @@ const std::map<UINT, Icon> MAIN_MENU_IMAGE_MAPPINGS = {
 
 	{ IDM_GO_BACK, Icon::Back },
 	{ IDM_GO_FORWARD, Icon::Forward },
-	{ IDM_GO_UPONELEVEL, Icon::Up },
+	{ IDM_GO_UP, Icon::Up },
 
 	{ IDM_TOOLS_SEARCH, Icon::Search },
 	{ IDM_TOOLS_CUSTOMIZECOLORS, Icon::CustomizeColors },
@@ -58,21 +67,43 @@ const std::map<UINT, Icon> MAIN_MENU_IMAGE_MAPPINGS = {
 
 void Explorerplusplus::InitializeMainMenu()
 {
+	FAIL_FAST_IF_FAILED(SHGetImageList(SHIL_SYSSMALL, IID_PPV_ARGS(&m_mainMenuSystemImageList)));
+
 	// These need to occur after the language module has been initialized, but
 	// before the tabs are restored.
-	HMENU mainMenu = LoadMenu(m_resourceInstance, MAKEINTRESOURCE(IDR_MAINMENU));
+	HMENU mainMenu = LoadMenu(m_app->GetResourceInstance(), MAKEINTRESOURCE(IDR_MAINMENU));
 
-	if (!FeatureList::GetInstance()->IsEnabled(Feature::DualPane))
+	if (!m_app->GetFeatureList()->IsEnabled(Feature::MultipleWindowsPerSession))
+	{
+		DeleteMenu(mainMenu, IDM_FILE_NEW_WINDOW, MF_BYCOMMAND);
+	}
+	else
+	{
+		// TODO: Selecting clone window launches a separate process. That doesn't fit in with how
+		// MultipleWindowsPerSession is designed to work and the menu item should be removed when
+		// the feature is enabled by default.
+		DeleteMenu(mainMenu, IDM_FILE_CLONEWINDOW, MF_BYCOMMAND);
+	}
+
+	if (!m_app->GetFeatureList()->IsEnabled(Feature::DualPane))
 	{
 		DeleteMenu(mainMenu, IDM_VIEW_DUAL_PANE, MF_BYCOMMAND);
 	}
 
-	if (!FeatureList::GetInstance()->IsEnabled(Feature::Plugins))
+	if (!m_app->GetFeatureList()->IsEnabled(Feature::Plugins))
 	{
 		DeleteMenu(mainMenu, IDM_TOOLS_RUNSCRIPT, MF_BYCOMMAND);
 	}
 
 	SetMenu(m_hContainer, mainMenu);
+
+	AddMainMenuSubmenu(mainMenu, IDM_FILE_REOPEN_RECENT_TAB,
+		[this](MenuView *menuView)
+		{
+			return std::make_unique<TabRestorerMenu>(menuView, m_app->GetAcceleratorManager(),
+				m_app->GetTabRestorer(), &m_shellIconLoader, m_app->GetResourceLoader(),
+				MENU_RECENT_TABS_START_ID, MENU_RECENT_TABS_END_ID);
+		});
 
 	AddViewModesToMenu(mainMenu, IDM_VIEW_PLACEHOLDER, FALSE);
 	DeleteMenu(mainMenu, IDM_VIEW_PLACEHOLDER, MF_BYCOMMAND);
@@ -80,6 +111,35 @@ void Explorerplusplus::InitializeMainMenu()
 	SetMainMenuImages();
 
 	InitializeGoMenu(mainMenu);
+
+	AddMainMenuSubmenu(mainMenu, IDM_GO_HISTORY,
+		[this](MenuView *menuView)
+		{
+			return std::make_unique<HistoryMenu>(menuView, m_app->GetAcceleratorManager(),
+				m_app->GetHistoryModel(), this, &m_shellIconLoader, MENU_HISTORY_START_ID,
+				MENU_HISTORY_END_ID);
+		});
+
+	AddMainMenuSubmenu(mainMenu, IDM_GO_FREQUENT_LOCATIONS,
+		[this](MenuView *menuView)
+		{
+			return std::make_unique<FrequentLocationsMenu>(menuView, m_app->GetAcceleratorManager(),
+				m_app->GetFrequentLocationsModel(), this, &m_shellIconLoader,
+				MENU_FREQUENT_LOCATIONS_START_ID, MENU_FREQUENT_LOCATIONS_END_ID);
+		});
+
+	AddGetMenuItemHelperTextObserver(
+		std::bind_front(&Explorerplusplus::MaybeGetMenuItemHelperText, this));
+
+	UpdateMenuAcceleratorStrings(mainMenu, m_app->GetAcceleratorManager());
+}
+
+void Explorerplusplus::AddMainMenuSubmenu(HMENU mainMenu, UINT subMenuItemId,
+	std::function<std::unique_ptr<MenuBase>(MenuView *menuView)> menuCreator)
+{
+	auto view = std::make_unique<MainMenuSubMenuView>(mainMenu, subMenuItemId);
+	auto menu = menuCreator(view.get());
+	m_mainMenuSubMenus.emplace_back(std::move(view), std::move(menu));
 }
 
 void Explorerplusplus::SetMainMenuImages()
@@ -89,9 +149,44 @@ void Explorerplusplus::SetMainMenuImages()
 
 	for (const auto &mapping : MAIN_MENU_IMAGE_MAPPINGS)
 	{
-		ResourceHelper::SetMenuItemImage(mainMenu, mapping.first, m_iconResourceLoader.get(),
-			mapping.second, dpi, m_menuImages);
+		ResourceHelper::SetMenuItemImage(mainMenu, mapping.first, m_app->GetIconResourceLoader(),
+			mapping.second, dpi, m_mainMenuImages);
 	}
+
+	SetPasteSymLinkElevationIcon();
+}
+
+void Explorerplusplus::SetPasteSymLinkElevationIcon()
+{
+	// Creating a symlink typically requires elevation. However, if the application is already
+	// elevated, there's no need to show the shield icon (which is used to indicate that elevation
+	// is required).
+	// Note that elevation isn't required if developer mode is enabled on Windows 10 and above.
+	// Since the status of developer mode isn't checked here, the shield icon may be shown in cases
+	// where elevation isn't actually required. That's not too much of an issue, since the icon here
+	// is considered to be a hint that elevation may be required.
+	if (IsProcessElevated())
+	{
+		return;
+	}
+
+	SHSTOCKICONINFO info = {};
+	info.cbSize = sizeof(info);
+	HRESULT hr = SHGetStockIconInfo(SIID_SHIELD, SHGSI_SYSICONINDEX, &info);
+
+	if (FAILED(hr))
+	{
+		DCHECK(false);
+		return;
+	}
+
+	wil::unique_hbitmap bitmap;
+	ImageHelper::ImageListIconToPBGRABitmap(m_mainMenuSystemImageList.get(), info.iSysImageIndex,
+		bitmap);
+
+	HMENU mainMenu = GetMenu(m_hContainer);
+	MenuHelper::SetBitmapForItem(mainMenu, IDM_EDIT_PASTE_SYMBOLIC_LINK, bitmap.get());
+	m_mainMenuImages.push_back(std::move(bitmap));
 }
 
 void Explorerplusplus::InitializeGoMenu(HMENU mainMenu)
@@ -99,7 +194,7 @@ void Explorerplusplus::InitializeGoMenu(HMENU mainMenu)
 	// This is a bit indirect, but it's better than using something like GetSubMenu(), which would
 	// rely on the "Go" menu remaining in a fixed position.
 	HMENU goMenu = MenuHelper::FindParentMenu(mainMenu, IDM_GO_BACK);
-	assert(goMenu);
+	CHECK(goMenu);
 
 	MenuHelper::AddSeparator(goMenu);
 
@@ -127,6 +222,7 @@ void Explorerplusplus::InitializeGoMenu(HMENU mainMenu)
 
 	AddGoMenuItem(goMenu, IDM_GO_WSL_DISTRIBUTIONS, WSL_DISTRIBUTIONS_PATH);
 
+	MenuHelper::RemoveDuplicateSeperators(goMenu);
 	MenuHelper::RemoveTrailingSeparators(goMenu);
 }
 
@@ -167,6 +263,27 @@ void Explorerplusplus::AddGoMenuItem(HMENU goMenu, UINT id, PCIDLIST_ABSOLUTE pi
 	}
 
 	MenuHelper::AddStringItem(goMenu, id, folderName);
+
+	m_iconFetcher.QueueIconTask(pidl,
+		[this, goMenu, id](int iconIndex, int overlayIndex)
+		{
+			UNREFERENCED_PARAMETER(overlayIndex);
+
+			// Accessing the Explorerplusplus instance here should always be safe. This callback is
+			// run on the main thread and will either run before the instance is destroyed, or not
+			// at all. It's not feasible for the callback to run while the destruction of the
+			// Explorerplusplus instance is ongoing (which would be unsafe), since even if messages
+			// were pumped, the window message handler that the class sets up will no longer be
+			// active. So, once destruction of the Explorerplusplus instance has started, there's no
+			// way for this callback to run.
+			wil::unique_hbitmap bitmap;
+			ImageHelper::ImageListIconToPBGRABitmap(m_mainMenuSystemImageList.get(), iconIndex,
+				bitmap);
+
+			MenuHelper::SetBitmapForItem(goMenu, id, bitmap.get());
+
+			m_mainMenuImages.push_back(std::move(bitmap));
+		});
 }
 
 boost::signals2::connection Explorerplusplus::AddMainMenuPreShowObserver(
@@ -203,6 +320,20 @@ void Explorerplusplus::OnExitMenuLoop(bool shortcutMenu)
 	}
 }
 
+bool Explorerplusplus::MaybeHandleMainMenuItemSelection(UINT id)
+{
+	auto *subMenu = MaybeGetMainMenuSubMenuFromId(id);
+
+	if (!subMenu)
+	{
+		return false;
+	}
+
+	subMenu->view->SelectItem(id, IsKeyDown(VK_CONTROL), IsKeyDown(VK_SHIFT));
+
+	return true;
+}
+
 boost::signals2::connection Explorerplusplus::AddMainMenuItemMiddleClickedObserver(
 	const MainMenuItemMiddleClickedSignal::slot_type &observer)
 {
@@ -215,6 +346,17 @@ void Explorerplusplus::OnMenuMiddleButtonUp(const POINT &pt, bool isCtrlKeyDown,
 	if (!m_mainMenuShowing)
 	{
 		return;
+	}
+
+	auto menuItemId = MenuHelper::MaybeGetMenuItemAtPoint(GetMenu(m_hContainer), pt);
+
+	if (menuItemId)
+	{
+		if (auto *subMenu = MaybeGetMainMenuSubMenuFromId(*menuItemId))
+		{
+			subMenu->view->MiddleClickItem(*menuItemId, isCtrlKeyDown, isShiftKeyDown);
+			return;
+		}
 	}
 
 	m_mainMenuItemMiddleClickedSignal(pt, isCtrlKeyDown, isShiftKeyDown);
@@ -240,4 +382,34 @@ boost::signals2::connection Explorerplusplus::AddGetMenuItemHelperTextObserver(
 	const GetMenuItemHelperTextSignal::slot_type &observer)
 {
 	return m_getMenuItemHelperTextSignal.connect(observer);
+}
+
+std::optional<std::wstring> Explorerplusplus::MaybeGetMenuItemHelperText(HMENU menu, int id)
+{
+	if (MenuHelper::IsPartOfMenu(GetMenu(m_hContainer), menu))
+	{
+		if (auto *subMenu = MaybeGetMainMenuSubMenuFromId(id))
+		{
+			return subMenu->view->GetHelpTextForItem(id);
+		}
+	}
+
+	return std::nullopt;
+}
+
+Explorerplusplus::MainMenuSubMenu *Explorerplusplus::MaybeGetMainMenuSubMenuFromId(UINT id)
+{
+	auto submenu = std::ranges::find_if(m_mainMenuSubMenus,
+		[id](const auto &submenu)
+		{
+			return id >= submenu.menu->GetIdRange().startId
+				&& id < submenu.menu->GetIdRange().endId;
+		});
+
+	if (submenu == m_mainMenuSubMenus.end())
+	{
+		return nullptr;
+	}
+
+	return &*submenu;
 }

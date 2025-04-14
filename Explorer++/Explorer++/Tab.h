@@ -4,19 +4,17 @@
 
 #pragma once
 
-#include "../Helper/Macros.h"
-#include <boost/signals2.hpp>
+#include <boost/core/noncopyable.hpp>
 #include <memory>
 
-class CoreInterface;
-class FileActionHandler;
-struct FolderColumns;
-struct FolderSettings;
-struct PreservedTab;
+class BrowserWindow;
 class ShellBrowser;
-class TabNavigationInterface;
+class ShellBrowserImpl;
+class TabContainer;
+class TabEvents;
+struct TabStorageData;
 
-class Tab
+class Tab : private boost::noncopyable
 {
 public:
 	enum class PropertyType
@@ -38,16 +36,23 @@ public:
 		AddressLocked
 	};
 
-	typedef boost::signals2::signal<void(const Tab &tab, PropertyType propertyType)>
-		TabUpdatedSignal;
+	struct InitialData
+	{
+		bool useCustomName = false;
+		std::wstring customName;
+		LockState lockState = LockState::NotLocked;
+	};
 
-	Tab(std::shared_ptr<ShellBrowser> shellBrowser);
-	Tab(const PreservedTab &preservedTab, std::shared_ptr<ShellBrowser> shellBrowser);
+	Tab(std::unique_ptr<ShellBrowser> shellBrowser, BrowserWindow *browser,
+		TabContainer *tabContainer, TabEvents *tabEvents, const InitialData &initialData = {});
 
 	int GetId() const;
 
 	ShellBrowser *GetShellBrowser() const;
-	std::weak_ptr<ShellBrowser> GetShellBrowserWeak() const;
+	ShellBrowserImpl *GetShellBrowserImpl() const;
+
+	BrowserWindow *GetBrowser() const;
+	TabContainer *GetTabContainer() const;
 
 	std::wstring GetName() const;
 	bool GetUseCustomName() const;
@@ -57,7 +62,10 @@ public:
 	LockState GetLockState() const;
 	void SetLockState(LockState lockState);
 
-	boost::signals2::connection AddTabUpdatedObserver(const TabUpdatedSignal::slot_type &observer);
+	// Returns true if the tab is locked, or address locked.
+	bool IsLocked() const;
+
+	TabStorageData GetStorageData() const;
 
 	/* Although each tab manages its
 	own columns, it does not know
@@ -67,16 +75,19 @@ public:
 	// BOOL	bUsingDefaultColumns;
 
 private:
-	DISALLOW_COPY_AND_ASSIGN(Tab);
+	void Initialize();
 
-	static int idCounter;
+	static inline int idCounter = 1;
 	const int m_id;
 
-	std::shared_ptr<ShellBrowser> m_shellBrowser;
+	const std::unique_ptr<ShellBrowser> m_shellBrowser;
+	ShellBrowserImpl *const m_shellBrowserImpl;
+
+	BrowserWindow *const m_browser;
+	TabContainer *const m_tabContainer;
+	TabEvents *const m_tabEvents;
 
 	bool m_useCustomName;
 	std::wstring m_customName;
 	LockState m_lockState;
-
-	TabUpdatedSignal m_tabUpdatedSignal;
 };

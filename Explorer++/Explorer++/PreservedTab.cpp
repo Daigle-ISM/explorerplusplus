@@ -4,12 +4,14 @@
 
 #include "stdafx.h"
 #include "PreservedTab.h"
+#include "BrowserWindow.h"
 #include "ShellBrowser/PreservedHistoryEntry.h"
 #include "ShellBrowser/ShellBrowser.h"
 #include "ShellBrowser/ShellNavigationController.h"
 
 PreservedTab::PreservedTab(const Tab &tab, int index) :
 	id(tab.GetId()),
+	browserId(tab.GetBrowser()->GetId()),
 	index(index),
 	history(CopyHistoryEntries(tab)),
 	currentEntry(tab.GetShellBrowser()->GetNavigationController()->GetCurrentIndex()),
@@ -30,7 +32,7 @@ std::vector<std::unique_ptr<PreservedHistoryEntry>> PreservedTab::CopyHistoryEnt
 		 i++)
 	{
 		auto entry = std::make_unique<PreservedHistoryEntry>(
-			*tab.GetShellBrowser()->GetNavigationController()->GetEntryAtIndex(i));
+			tab.GetShellBrowser()->GetNavigationController()->GetEntryAtIndex(i)->GetPidl());
 		history.push_back(std::move(entry));
 	}
 

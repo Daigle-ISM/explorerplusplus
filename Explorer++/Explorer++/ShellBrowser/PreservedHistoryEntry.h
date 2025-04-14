@@ -4,24 +4,15 @@
 
 #pragma once
 
-#include "../Helper/Macros.h"
-#include "../Helper/ShellHelper.h"
-#include <optional>
+#include "../Helper/PidlHelper.h"
 
-class HistoryEntry;
-
-struct PreservedHistoryEntry
+class PreservedHistoryEntry
 {
 public:
-	PreservedHistoryEntry(const HistoryEntry &entry);
+	PreservedHistoryEntry(const PidlAbsolute &pidl);
 
-	const int id;
-
-	unique_pidl_absolute pidl;
-	std::wstring displayName;
-	std::wstring fullPathForDisplay;
-	std::optional<int> systemIconIndex;
+	const PidlAbsolute &GetPidl() const;
 
 private:
-	DISALLOW_COPY_AND_ASSIGN(PreservedHistoryEntry);
+	const PidlAbsolute m_pidl;
 };

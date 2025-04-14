@@ -3,10 +3,10 @@
 // See LICENSE in the top level directory
 
 #include "stdafx.h"
-#include "ShellBrowser.h"
+#include "ShellBrowserImpl.h"
 #include "Config.h"
 
-void ShellBrowser::InsertTileViewColumns()
+void ShellBrowserImpl::InsertTileViewColumns()
 {
 	LVCOLUMN lvColumn;
 	lvColumn.mask = 0;
@@ -28,7 +28,7 @@ void ShellBrowser::InsertTileViewColumns()
 	ListView_SetTileViewInfo(m_hListView, &lvtvi);
 }
 
-void ShellBrowser::SetTileViewInfo()
+void ShellBrowserImpl::SetTileViewInfo()
 {
 	LVITEM lvItem;
 	BOOL bRes;
@@ -52,7 +52,7 @@ void ShellBrowser::SetTileViewInfo()
 }
 
 /* TODO: Make this function configurable. */
-void ShellBrowser::SetTileViewItemInfo(int iItem, int iItemInternal)
+void ShellBrowserImpl::SetTileViewItemInfo(int iItem, int iItemInternal)
 {
 	SHFILEINFO shfi;
 	LVTILEINFO lvti;
@@ -78,9 +78,9 @@ void ShellBrowser::SetTileViewItemInfo(int iItem, int iItemInternal)
 		ULARGE_INTEGER fileSize = { m_itemInfoMap.at(iItemInternal).wfd.nFileSizeLow,
 			m_itemInfoMap.at(iItemInternal).wfd.nFileSizeHigh };
 
-		SizeDisplayFormat displayFormat = m_config->globalFolderSettings.forceSize
+		auto displayFormat = m_config->globalFolderSettings.forceSize
 			? m_config->globalFolderSettings.sizeDisplayFormat
-			: SizeDisplayFormat::None;
+			: +SizeDisplayFormat::None;
 		std::wstring fileSizeText = FormatSizeString(fileSize.QuadPart, displayFormat);
 		ListView_SetItemText(m_hListView, iItem, 2, fileSizeText.data());
 	}

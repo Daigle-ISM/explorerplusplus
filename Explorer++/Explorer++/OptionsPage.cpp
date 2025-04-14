@@ -6,6 +6,7 @@
 #include "OptionsPage.h"
 #include "ResourceHelper.h"
 #include "../Helper/Controls.h"
+#include "../Helper/ListViewHelper.h"
 #include "../Helper/ResizableDialogHelper.h"
 #include "../Helper/WindowHelper.h"
 #include <memory>
@@ -14,14 +15,14 @@
 OptionsPage::OptionsPage(UINT dialogResourceId, UINT titleResourceId, HWND parent,
 	HINSTANCE resourceInstance, Config *config, CoreInterface *coreInterface,
 	SettingChangedCallback settingChangedCallback, HWND tooltipWindow) :
-	m_dialogResourceId(dialogResourceId),
-	m_titleResourceId(titleResourceId),
-	m_parent(parent),
 	m_config(config),
 	m_coreInterface(coreInterface),
 	m_resourceInstance(resourceInstance),
+	m_tooltipWindow(tooltipWindow),
 	m_settingChangedCallback(settingChangedCallback),
-	m_tooltipWindow(tooltipWindow)
+	m_dialogResourceId(dialogResourceId),
+	m_titleResourceId(titleResourceId),
+	m_parent(parent)
 {
 }
 
@@ -35,7 +36,7 @@ void OptionsPage::InitializeDialog()
 {
 	if (m_dialog)
 	{
-		assert(false);
+		DCHECK(false);
 		return;
 	}
 
@@ -64,9 +65,9 @@ INT_PTR CALLBACK OptionsPage::DialogProcStub(HWND dlg, UINT msg, WPARAM wParam, 
 		optionsDialogPage = reinterpret_cast<OptionsPage *>(lParam);
 
 		SetLastError(0);
-		[[maybe_unused]] auto res =
+		auto res =
 			SetWindowLongPtr(dlg, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(optionsDialogPage));
-		assert(!(res == 0 && GetLastError() != 0));
+		DCHECK(!(res == 0 && GetLastError() != 0));
 	}
 	break;
 
@@ -150,7 +151,7 @@ BOOL CALLBACK OptionsPage::CheckChildWindowForTextMatch(HWND hwnd, LPARAM lParam
 
 	if (res == 0)
 	{
-		assert(false);
+		DCHECK(false);
 		return TRUE;
 	}
 
@@ -165,6 +166,11 @@ BOOL CALLBACK OptionsPage::CheckChildWindowForTextMatch(HWND hwnd, LPARAM lParam
 	else if (lstrcmp(className, WC_COMBOBOX) == 0)
 	{
 		matchFound = DoesComboBoxContainText(hwnd, searchData->text, searchData->stringComparator);
+	}
+	else if (lstrcmp(className, WC_LISTVIEW) == 0)
+	{
+		matchFound = ListViewHelper::DoesListViewContainText(hwnd, searchData->text,
+			searchData->stringComparator);
 	}
 
 	if (matchFound)

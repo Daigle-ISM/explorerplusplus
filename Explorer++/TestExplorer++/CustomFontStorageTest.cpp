@@ -5,15 +5,15 @@
 #include "pch.h"
 #include "CustomFontStorage.h"
 #include "CustomFont.h"
-#include "RegistryStorageHelper.h"
-#include "ResourceHelper.h"
-#include "XmlStorageHelper.h"
+#include "RegistryStorageTestHelper.h"
+#include "ResourceTestHelper.h"
+#include "XmlStorageTestHelper.h"
 #include "../Helper/XMLSettings.h"
 #include <gtest/gtest.h>
+#include <wil/registry.h>
+#include <format>
 
 using namespace testing;
-
-const WCHAR MAIN_FONT_NODE_NAME[] = L"MainFont";
 
 CustomFont BuildLoadSaveReferenceFont()
 {
@@ -23,7 +23,7 @@ CustomFont BuildLoadSaveReferenceFont()
 class CustomFontRegistryStorageTest : public RegistryStorageTest
 {
 protected:
-	static inline const std::wstring KEY_PATH = APPLICATION_TEST_KEY + L"\\MainFont";
+	static inline const wchar_t MAIN_FONT_KEY_NAME[] = L"MainFont";
 };
 
 TEST_F(CustomFontRegistryStorageTest, Load)
@@ -32,7 +32,12 @@ TEST_F(CustomFontRegistryStorageTest, Load)
 
 	ImportRegistryResource(L"custom-font.reg");
 
-	auto loadedFont = LoadCustomFontFromRegistry(KEY_PATH);
+	wil::unique_hkey mainFontKey;
+	HRESULT hr = wil::reg::open_unique_key_nothrow(m_applicationTestKey.get(), MAIN_FONT_KEY_NAME,
+		mainFontKey, wil::reg::key_access::read);
+	ASSERT_HRESULT_SUCCEEDED(hr);
+
+	auto loadedFont = CustomFontStorage::LoadFromRegistry(mainFontKey.get());
 	ASSERT_NE(loadedFont, nullptr);
 
 	EXPECT_EQ(*loadedFont, referenceFont);
@@ -42,9 +47,14 @@ TEST_F(CustomFontRegistryStorageTest, Save)
 {
 	CustomFont referenceFont = BuildLoadSaveReferenceFont();
 
-	SaveCustomFontToRegistry(KEY_PATH, referenceFont);
+	wil::unique_hkey mainFontKey;
+	HRESULT hr = wil::reg::create_unique_key_nothrow(m_applicationTestKey.get(), MAIN_FONT_KEY_NAME,
+		mainFontKey, wil::reg::key_access::readwrite);
+	ASSERT_HRESULT_SUCCEEDED(hr);
 
-	auto loadedFont = LoadCustomFontFromRegistry(KEY_PATH);
+	CustomFontStorage::SaveToRegistry(mainFontKey.get(), referenceFont);
+
+	auto loadedFont = CustomFontStorage::LoadFromRegistry(mainFontKey.get());
 	ASSERT_NE(loadedFont, nullptr);
 
 	EXPECT_EQ(*loadedFont, referenceFont);
@@ -52,6 +62,8 @@ TEST_F(CustomFontRegistryStorageTest, Save)
 
 class CustomFontXmlStorageTest : public XmlStorageTest
 {
+protected:
+	static inline const WCHAR MAIN_FONT_NODE_NAME[] = L"MainFont";
 };
 
 TEST_F(CustomFontXmlStorageTest, Load)
@@ -59,17 +71,15 @@ TEST_F(CustomFontXmlStorageTest, Load)
 	CustomFont referenceFont = BuildLoadSaveReferenceFont();
 
 	std::wstring xmlFilePath = GetResourcePath(L"custom-font-config.xml");
-	auto xmlDocument = LoadXmlDocument(xmlFilePath);
-	ASSERT_TRUE(xmlDocument);
+	auto xmlDocumentData = LoadXmlDocument(xmlFilePath);
 
 	wil::com_ptr_nothrow<IXMLDOMNode> mainFontNode;
 	auto queryString = wil::make_bstr_nothrow(
-		(std::wstring(L"/ExplorerPlusPlus/Settings/Setting[@name='") + MAIN_FONT_NODE_NAME + L"']")
-			.c_str());
-	HRESULT hr = xmlDocument->selectSingleNode(queryString.get(), &mainFontNode);
+		std::format(L"Settings/Setting[@name='{}']", MAIN_FONT_NODE_NAME).c_str());
+	HRESULT hr = xmlDocumentData.rootNode->selectSingleNode(queryString.get(), &mainFontNode);
 	ASSERT_EQ(hr, S_OK);
 
-	auto loadedFont = LoadCustomFontFromXml(mainFontNode.get());
+	auto loadedFont = CustomFontStorage::LoadFromXml(mainFontNode.get());
 	ASSERT_NE(loadedFont, nullptr);
 
 	EXPECT_EQ(*loadedFont, referenceFont);
@@ -80,19 +90,19 @@ TEST_F(CustomFontXmlStorageTest, Save)
 	CustomFont referenceFont = BuildLoadSaveReferenceFont();
 
 	auto xmlDocumentData = CreateXmlDocument();
-	ASSERT_TRUE(xmlDocumentData);
 
 	wil::com_ptr_nothrow<IXMLDOMElement> settingsNode;
 	auto bstr = wil::make_bstr_nothrow(L"Settings");
-	HRESULT hr = xmlDocumentData->xmlDocument->createElement(bstr.get(), &settingsNode);
+	HRESULT hr = xmlDocumentData.xmlDocument->createElement(bstr.get(), &settingsNode);
 	ASSERT_HRESULT_SUCCEEDED(hr);
 
 	wil::com_ptr_nothrow<IXMLDOMElement> mainFontNode;
-	NXMLSettings::CreateElementNode(xmlDocumentData->xmlDocument.get(), &mainFontNode,
+	XMLSettings::CreateElementNode(xmlDocumentData.xmlDocument.get(), &mainFontNode,
 		settingsNode.get(), L"Setting", MAIN_FONT_NODE_NAME);
-	SaveCustomFontToXml(xmlDocumentData->xmlDocument.get(), mainFontNode.get(), referenceFont);
+	CustomFontStorage::SaveToXml(xmlDocumentData.xmlDocument.get(), mainFontNode.get(),
+		referenceFont);
 
-	auto loadedFont = LoadCustomFontFromXml(mainFontNode.get());
+	auto loadedFont = CustomFontStorage::LoadFromXml(mainFontNode.get());
 	ASSERT_NE(loadedFont, nullptr);
 
 	EXPECT_EQ(*loadedFont, referenceFont);

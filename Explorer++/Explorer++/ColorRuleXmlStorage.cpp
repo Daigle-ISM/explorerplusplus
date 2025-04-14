@@ -13,12 +13,12 @@ namespace ColorRuleXmlStorage
 namespace
 {
 
-const TCHAR COLOR_RULES_NODE_NAME[] = _T("ColorRules");
+const wchar_t COLOR_RULES_NODE_NAME[] = L"ColorRules";
 
-const TCHAR SETTING_DESCRIPTION[] = _T("name");
-const TCHAR SETTING_FILENAME_PATTERN[] = _T("FilenamePattern");
-const TCHAR SETTING_CASE_INSENSITIVE[] = _T("CaseInsensitive");
-const TCHAR SETTING_ATTRIBUTES[] = _T("Attributes");
+const wchar_t SETTING_DESCRIPTION[] = L"name";
+const wchar_t SETTING_FILENAME_PATTERN[] = L"FilenamePattern";
+const wchar_t SETTING_CASE_INSENSITIVE[] = L"CaseInsensitive";
+const wchar_t SETTING_ATTRIBUTES[] = L"Attributes";
 
 std::unique_ptr<ColorRule> LoadColorRule(IXMLDOMNode *parentNode)
 {
@@ -31,7 +31,7 @@ std::unique_ptr<ColorRule> LoadColorRule(IXMLDOMNode *parentNode)
 	}
 
 	std::wstring description;
-	hr = NXMLSettings::GetStringFromMap(attributeMap.get(), SETTING_DESCRIPTION, description);
+	hr = XMLSettings::GetStringFromMap(attributeMap.get(), SETTING_DESCRIPTION, description);
 
 	if (FAILED(hr))
 	{
@@ -39,7 +39,7 @@ std::unique_ptr<ColorRule> LoadColorRule(IXMLDOMNode *parentNode)
 	}
 
 	std::wstring filenamePattern;
-	hr = NXMLSettings::GetStringFromMap(attributeMap.get(), SETTING_FILENAME_PATTERN,
+	hr = XMLSettings::GetStringFromMap(attributeMap.get(), SETTING_FILENAME_PATTERN,
 		filenamePattern);
 
 	if (FAILED(hr))
@@ -48,8 +48,7 @@ std::unique_ptr<ColorRule> LoadColorRule(IXMLDOMNode *parentNode)
 	}
 
 	bool caseInsensitive;
-	hr =
-		NXMLSettings::GetBoolFromMap(attributeMap.get(), SETTING_CASE_INSENSITIVE, caseInsensitive);
+	hr = XMLSettings::GetBoolFromMap(attributeMap.get(), SETTING_CASE_INSENSITIVE, caseInsensitive);
 
 	if (FAILED(hr))
 	{
@@ -57,7 +56,7 @@ std::unique_ptr<ColorRule> LoadColorRule(IXMLDOMNode *parentNode)
 	}
 
 	int attributes;
-	hr = NXMLSettings::GetIntFromMap(attributeMap.get(), SETTING_ATTRIBUTES, attributes);
+	hr = XMLSettings::GetIntFromMap(attributeMap.get(), SETTING_ATTRIBUTES, attributes);
 
 	if (FAILED(hr))
 	{
@@ -65,7 +64,7 @@ std::unique_ptr<ColorRule> LoadColorRule(IXMLDOMNode *parentNode)
 	}
 
 	COLORREF color;
-	hr = NXMLSettings::ReadRgb(attributeMap.get(), color);
+	hr = XMLSettings::ReadRgb(attributeMap.get(), color);
 
 	if (FAILED(hr))
 	{
@@ -106,15 +105,15 @@ void SaveColorRule(IXMLDOMDocument *xmlDocument, IXMLDOMElement *parentNode,
 	const ColorRule *colorRule)
 {
 	wil::com_ptr_nothrow<IXMLDOMElement> colorRuleNode;
-	NXMLSettings::CreateElementNode(xmlDocument, &colorRuleNode, parentNode, _T("ColorRule"),
+	XMLSettings::CreateElementNode(xmlDocument, &colorRuleNode, parentNode, _T("ColorRule"),
 		colorRule->GetDescription().c_str());
-	NXMLSettings::AddAttributeToNode(xmlDocument, colorRuleNode.get(), SETTING_FILENAME_PATTERN,
+	XMLSettings::AddAttributeToNode(xmlDocument, colorRuleNode.get(), SETTING_FILENAME_PATTERN,
 		colorRule->GetFilterPattern().c_str());
-	NXMLSettings::AddAttributeToNode(xmlDocument, colorRuleNode.get(), SETTING_CASE_INSENSITIVE,
-		NXMLSettings::EncodeBoolValue(colorRule->GetFilterPatternCaseInsensitive()));
-	NXMLSettings::AddAttributeToNode(xmlDocument, colorRuleNode.get(), SETTING_ATTRIBUTES,
-		NXMLSettings::EncodeIntValue(colorRule->GetFilterAttributes()));
-	NXMLSettings::SaveRgb(xmlDocument, colorRuleNode.get(), colorRule->GetColor());
+	XMLSettings::AddAttributeToNode(xmlDocument, colorRuleNode.get(), SETTING_CASE_INSENSITIVE,
+		XMLSettings::EncodeBoolValue(colorRule->GetFilterPatternCaseInsensitive()));
+	XMLSettings::AddAttributeToNode(xmlDocument, colorRuleNode.get(), SETTING_ATTRIBUTES,
+		XMLSettings::EncodeIntValue(colorRule->GetFilterAttributes()));
+	XMLSettings::SaveRgb(xmlDocument, colorRuleNode.get(), colorRule->GetColor());
 }
 
 void SaveToNode(IXMLDOMDocument *xmlDocument, IXMLDOMElement *parentNode,
@@ -128,14 +127,13 @@ void SaveToNode(IXMLDOMDocument *xmlDocument, IXMLDOMElement *parentNode,
 
 }
 
-void Load(IXMLDOMDocument *xmlDocument, ColorRuleModel *model)
+void Load(IXMLDOMNode *rootNode, ColorRuleModel *model)
 {
 	wil::com_ptr_nothrow<IXMLDOMNode> colorRulesNode;
-	auto queryString = wil::make_bstr_nothrow(
-		(std::wstring(L"/ExplorerPlusPlus/") + std::wstring(COLOR_RULES_NODE_NAME)).c_str());
-	HRESULT hr = xmlDocument->selectSingleNode(queryString.get(), &colorRulesNode);
+	auto queryString = wil::make_bstr_nothrow(COLOR_RULES_NODE_NAME);
+	HRESULT hr = rootNode->selectSingleNode(queryString.get(), &colorRulesNode);
 
-	if (FAILED(hr))
+	if (hr != S_OK)
 	{
 		return;
 	}
@@ -145,7 +143,7 @@ void Load(IXMLDOMDocument *xmlDocument, ColorRuleModel *model)
 	LoadFromNode(colorRulesNode.get(), model);
 }
 
-void Save(IXMLDOMDocument *xmlDocument, IXMLDOMElement *rootNode, const ColorRuleModel *model)
+void Save(IXMLDOMDocument *xmlDocument, IXMLDOMNode *rootNode, const ColorRuleModel *model)
 {
 	wil::com_ptr_nothrow<IXMLDOMElement> colorRulesNode;
 	auto nodeName = wil::make_bstr_nothrow(COLOR_RULES_NODE_NAME);
@@ -158,7 +156,7 @@ void Save(IXMLDOMDocument *xmlDocument, IXMLDOMElement *rootNode, const ColorRul
 
 	SaveToNode(xmlDocument, colorRulesNode.get(), model);
 
-	NXMLSettings::AppendChildToParent(colorRulesNode.get(), rootNode);
+	XMLSettings::AppendChildToParent(colorRulesNode.get(), rootNode);
 }
 
 }

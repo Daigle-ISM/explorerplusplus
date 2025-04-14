@@ -11,7 +11,7 @@
 struct Column_t;
 class IconResourceLoader;
 class SelectColumnsDialog;
-class ShellBrowser;
+class ShellBrowserImpl;
 
 class SelectColumnsDialogPersistentSettings : public DialogSettings
 {
@@ -32,8 +32,8 @@ private:
 class SelectColumnsDialog : public ThemedDialog
 {
 public:
-	SelectColumnsDialog(HINSTANCE resourceInstance, HWND hParent, ShellBrowser *shellBrowser,
-		IconResourceLoader *iconResourceLoader);
+	SelectColumnsDialog(HINSTANCE resourceInstance, HWND hParent, ThemeManager *themeManager,
+		ShellBrowserImpl *shellBrowser, IconResourceLoader *iconResourceLoader);
 
 protected:
 	INT_PTR OnInitDialog() override;
@@ -61,7 +61,7 @@ private:
 	void OnLvnItemChanged(const NMLISTVIEW *pnmlv);
 	void OnMoveColumn(MoveDirection direction);
 
-	ShellBrowser *m_shellBrowser;
+	ShellBrowserImpl *m_shellBrowser;
 	IconResourceLoader *m_iconResourceLoader;
 	BOOL m_bColumnsSwapped;
 

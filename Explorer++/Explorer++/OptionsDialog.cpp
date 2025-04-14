@@ -5,9 +5,10 @@
 #include "stdafx.h"
 #include "OptionsDialog.h"
 #include "AdvancedOptionsPage.h"
+#include "App.h"
 #include "AppearanceOptionsPage.h"
 #include "CoreInterface.h"
-#include "DarkModeHelper.h"
+#include "DarkModeManager.h"
 #include "DefaultSettingsOptionsPage.h"
 #include "FilesFoldersOptionsPage.h"
 #include "FontsOptionsPage.h"
@@ -16,16 +17,20 @@
 #include "IconResourceLoader.h"
 #include "MainResource.h"
 #include "ResourceHelper.h"
+#include "StartupOptionsPage.h"
 #include "TabsOptionsPage.h"
 #include "WindowOptionsPage.h"
 #include "../Helper/DpiCompatibility.h"
+#include "../Helper/ScopedRedrawDisabler.h"
 #include "../Helper/WindowHelper.h"
-#include "../Helper/WindowSubclassWrapper.h"
+#include "../Helper/WindowSubclass.h"
 #include <boost/algorithm/string/predicate.hpp>
 
-OptionsDialog::OptionsDialog(HINSTANCE resourceInstance, HWND parent,
-	std::shared_ptr<Config> config, CoreInterface *coreInterface) :
-	ThemedDialog(resourceInstance, IDD_OPTIONS, parent, DialogSizingType::Both),
+OptionsDialog::OptionsDialog(HINSTANCE resourceInstance, HWND parent, App *app, Config *config,
+	CoreInterface *coreInterface) :
+	ThemedDialog(resourceInstance, IDD_OPTIONS, parent, DialogSizingType::Both,
+		app->GetThemeManager()),
+	m_app(app),
 	m_config(config),
 	m_resourceInstance(resourceInstance),
 	m_coreInterface(coreInterface)
@@ -57,7 +62,7 @@ INT_PTR OptionsDialog::OnInitDialog()
 void OptionsDialog::SetupSearchField()
 {
 	auto searchField = GetDlgItem(m_hDlg, IDC_OPTIONS_SEARCH);
-	m_windowSubclasses.push_back(std::make_unique<WindowSubclassWrapper>(searchField,
+	m_windowSubclasses.push_back(std::make_unique<WindowSubclass>(searchField,
 		std::bind_front(&OptionsDialog::SearchFieldWndProc, this)));
 
 	auto placeholderText = ResourceHelper::LoadString(m_coreInterface->GetResourceInstance(),
@@ -102,8 +107,8 @@ void OptionsDialog::AddDynamicControls()
 
 wil::unique_hicon OptionsDialog::GetDialogIcon(int iconWidth, int iconHeight) const
 {
-	return m_coreInterface->GetIconResourceLoader()->LoadIconFromPNGAndScale(Icon::Options,
-		iconWidth, iconHeight);
+	return m_app->GetIconResourceLoader()->LoadIconFromPNGAndScale(Icon::Options, iconWidth,
+		iconHeight);
 }
 
 std::vector<ResizableDialogControl> OptionsDialog::GetResizableControls()
@@ -125,22 +130,26 @@ std::vector<ResizableDialogControl> OptionsDialog::GetResizableControls()
 
 void OptionsDialog::AddPages()
 {
-	AddPage(std::make_unique<GeneralOptionsPage>(m_hDlg, GetResourceInstance(), m_config.get(),
+	AddPage(std::make_unique<GeneralOptionsPage>(m_hDlg, GetResourceInstance(), m_app, m_config,
 		m_coreInterface, std::bind(&OptionsDialog::OnSettingChanged, this), m_tipWnd));
-	AddPage(std::make_unique<AppearanceOptionsPage>(m_hDlg, GetResourceInstance(), m_config.get(),
+	AddPage(std::make_unique<StartupOptionsPage>(m_hDlg, GetResourceInstance(), m_config,
+		m_coreInterface, std::bind(&OptionsDialog::OnSettingChanged, this), m_tipWnd,
+		m_app->GetDarkModeManager(), GetThemeManager()));
+	AddPage(std::make_unique<AppearanceOptionsPage>(m_hDlg, GetResourceInstance(), m_config,
+		m_coreInterface, std::bind(&OptionsDialog::OnSettingChanged, this), m_tipWnd,
+		m_app->GetDarkModeManager(), m_app->GetResourceLoader()));
+	AddPage(std::make_unique<FontsOptionsPage>(m_hDlg, GetResourceInstance(), m_config,
 		m_coreInterface, std::bind(&OptionsDialog::OnSettingChanged, this), m_tipWnd));
-	AddPage(std::make_unique<FontsOptionsPage>(m_hDlg, GetResourceInstance(), m_config.get(),
+	AddPage(std::make_unique<FilesFoldersOptionsPage>(m_hDlg, GetResourceInstance(), m_config,
 		m_coreInterface, std::bind(&OptionsDialog::OnSettingChanged, this), m_tipWnd));
-	AddPage(std::make_unique<FilesFoldersOptionsPage>(m_hDlg, GetResourceInstance(), m_config.get(),
+	AddPage(std::make_unique<WindowOptionsPage>(m_hDlg, GetResourceInstance(), m_config,
 		m_coreInterface, std::bind(&OptionsDialog::OnSettingChanged, this), m_tipWnd));
-	AddPage(std::make_unique<WindowOptionsPage>(m_hDlg, GetResourceInstance(), m_config.get(),
+	AddPage(std::make_unique<TabsOptionsPage>(m_hDlg, GetResourceInstance(), m_config,
 		m_coreInterface, std::bind(&OptionsDialog::OnSettingChanged, this), m_tipWnd));
-	AddPage(std::make_unique<TabsOptionsPage>(m_hDlg, GetResourceInstance(), m_config.get(),
-		m_coreInterface, std::bind(&OptionsDialog::OnSettingChanged, this), m_tipWnd));
-	AddPage(
-		std::make_unique<DefaultSettingsOptionsPage>(m_hDlg, GetResourceInstance(), m_config.get(),
-			m_coreInterface, std::bind(&OptionsDialog::OnSettingChanged, this), m_tipWnd));
-	AddPage(std::make_unique<AdvancedOptionsPage>(m_hDlg, GetResourceInstance(), m_config.get(),
+	AddPage(std::make_unique<DefaultSettingsOptionsPage>(m_hDlg, GetResourceInstance(), m_config,
+		m_coreInterface, std::bind(&OptionsDialog::OnSettingChanged, this), m_tipWnd,
+		GetThemeManager()));
+	AddPage(std::make_unique<AdvancedOptionsPage>(m_hDlg, GetResourceInstance(), m_config,
 		m_coreInterface, std::bind(&OptionsDialog::OnSettingChanged, this), m_tipWnd));
 }
 
@@ -168,7 +177,7 @@ void OptionsDialog::AddPagesToTreeView()
 {
 	auto treeView = GetDlgItem(m_hDlg, IDC_OPTIONS_PAGES_TREE);
 
-	SendMessage(treeView, WM_SETREDRAW, false, 0);
+	ScopedRedrawDisabler redrawDisabler(treeView);
 
 	// As items are deleted, the selection will be automatically updated, but there's no need to
 	// process the selection notification in that case.
@@ -187,8 +196,6 @@ void OptionsDialog::AddPagesToTreeView()
 	{
 		AddPageToTreeView(item.second.get(), item.first);
 	}
-
-	SendMessage(treeView, WM_SETREDRAW, true, 0);
 
 	HWND noResultsControl = GetDlgItem(m_hDlg, IDC_OPTIONS_NO_RESULTS_FOUND);
 
@@ -273,7 +280,7 @@ INT_PTR OptionsDialog::OnCtlColorStatic(HWND hwnd, HDC hdc)
 
 	// In dark mode, the background color in the static control will be the same as the background
 	// color in the treeview, so there's no need to handle this message.
-	if (DarkModeHelper::GetInstance().IsDarkModeEnabled())
+	if (m_app->GetDarkModeManager()->IsDarkModeEnabled())
 	{
 		// This will result in the default message handling being performed.
 		return FALSE;
@@ -384,8 +391,6 @@ void OptionsDialog::OnApply()
 	{
 		page->SaveSettings();
 	}
-
-	m_coreInterface->SaveAllSettings();
 
 	EnableWindow(GetDlgItem(m_hDlg, IDAPPLY), false);
 }

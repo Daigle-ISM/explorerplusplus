@@ -9,10 +9,10 @@
 namespace DialogHelper
 {
 
-void LoadDialogStatesFromRegistry();
-void SaveDialogStatesToRegistry();
+void LoadDialogStatesFromRegistry(HKEY applicationKey);
+void SaveDialogStatesToRegistry(HKEY applicationKey);
 
 void LoadDialogStatesFromXML(IXMLDOMDocument *xmlDocument);
-void SaveDialogStatesToXML(IXMLDOMDocument *xmlDocument, IXMLDOMElement *rootNode);
+void SaveDialogStatesToXML(IXMLDOMDocument *xmlDocument, IXMLDOMNode *rootNode);
 
 }

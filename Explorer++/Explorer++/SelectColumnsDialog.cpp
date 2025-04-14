@@ -8,18 +8,19 @@
 #include "MainResource.h"
 #include "ResourceHelper.h"
 #include "ShellBrowser/Columns.h"
-#include "ShellBrowser/ShellBrowser.h"
+#include "ShellBrowser/ShellBrowserImpl.h"
 #include "ShellBrowser/ShellNavigationController.h"
 #include "../Helper/ListViewHelper.h"
-#include "../Helper/Macros.h"
 #include <algorithm>
 #include <functional>
 
 const TCHAR SelectColumnsDialogPersistentSettings::SETTINGS_KEY[] = _T("SelectColumns");
 
 SelectColumnsDialog::SelectColumnsDialog(HINSTANCE resourceInstance, HWND hParent,
-	ShellBrowser *shellBrowser, IconResourceLoader *iconResourceLoader) :
-	ThemedDialog(resourceInstance, IDD_SELECTCOLUMNS, hParent, DialogSizingType::Both),
+	ThemeManager *themeManager, ShellBrowserImpl *shellBrowser,
+	IconResourceLoader *iconResourceLoader) :
+	ThemedDialog(resourceInstance, IDD_SELECTCOLUMNS, hParent, DialogSizingType::Both,
+		themeManager),
 	m_shellBrowser(shellBrowser),
 	m_iconResourceLoader(iconResourceLoader),
 	m_bColumnsSwapped(FALSE)
@@ -46,7 +47,7 @@ INT_PTR SelectColumnsDialog::OnInitDialog()
 	for (const auto &column : currentColumns)
 	{
 		std::wstring text = ResourceHelper::LoadString(GetResourceInstance(),
-			ShellBrowser::LookupColumnNameStringIndex(column.type));
+			ShellBrowserImpl::LookupColumnNameStringIndex(column.type));
 
 		LVITEM lvItem;
 		lvItem.mask = LVIF_TEXT | LVIF_PARAM;
@@ -56,14 +57,14 @@ INT_PTR SelectColumnsDialog::OnInitDialog()
 		lvItem.lParam = static_cast<LPARAM>(column.type);
 		ListView_InsertItem(hListView, &lvItem);
 
-		ListView_SetCheckState(hListView, iItem, column.bChecked);
+		ListView_SetCheckState(hListView, iItem, column.checked);
 
 		iItem++;
 	}
 
 	ListView_SetColumnWidth(hListView, 0, LVSCW_AUTOSIZE);
 
-	ListViewHelper::SelectItem(hListView, 0, TRUE);
+	ListViewHelper::SelectItem(hListView, 0, true);
 	SetFocus(hListView);
 
 	m_persistentSettings->RestoreDialogPosition(m_hDlg, true);
@@ -79,29 +80,29 @@ wil::unique_hicon SelectColumnsDialog::GetDialogIcon(int iconWidth, int iconHeig
 
 bool SelectColumnsDialog::CompareColumns(const Column_t &column1, const Column_t &column2)
 {
-	if (column1.bChecked && column2.bChecked)
+	if (column1.checked && column2.checked)
 	{
 		// If both column are checked, preserve the input ordering (this is
 		// the order that the columns will actually appear in the listview).
 		// This matches the behavior of Windows Explorer.
 		return false;
 	}
-	else if (column1.bChecked && !column2.bChecked)
+	else if (column1.checked && !column2.checked)
 	{
 		return true;
 	}
-	else if (!column1.bChecked && column2.bChecked)
+	else if (!column1.checked && column2.checked)
 	{
 		return false;
 	}
 
 	TCHAR column1Text[64];
-	LoadString(GetResourceInstance(), ShellBrowser::LookupColumnNameStringIndex(column1.type),
-		column1Text, SIZEOF_ARRAY(column1Text));
+	LoadString(GetResourceInstance(), ShellBrowserImpl::LookupColumnNameStringIndex(column1.type),
+		column1Text, std::size(column1Text));
 
 	TCHAR column2Text[64];
-	LoadString(GetResourceInstance(), ShellBrowser::LookupColumnNameStringIndex(column2.type),
-		column2Text, SIZEOF_ARRAY(column2Text));
+	LoadString(GetResourceInstance(), ShellBrowserImpl::LookupColumnNameStringIndex(column2.type),
+		column2Text, std::size(column2Text));
 
 	int ret = StrCmpLogicalW(column1Text, column2Text);
 
@@ -207,14 +208,16 @@ void SelectColumnsDialog::OnOk()
 		lvItem.iSubItem = 0;
 		ListView_GetItem(hListView, &lvItem);
 
-		ColumnType columnType = static_cast<ColumnType>(lvItem.lParam);
+		auto columnType =
+			ColumnType::_from_integral_nothrow(static_cast<ColumnType::_integral>(lvItem.lParam));
+		CHECK(columnType);
 		auto itr = std::find_if(currentColumns.begin(), currentColumns.end(),
-			[columnType](const Column_t &column) { return column.type == columnType; });
+			[&columnType](const Column_t &column) { return column.type == *columnType; });
 
 		Column_t column;
-		column.type = columnType;
-		column.iWidth = itr->iWidth;
-		column.bChecked = ListView_GetCheckState(hListView, i);
+		column.type = *columnType;
+		column.width = itr->width;
+		column.checked = ListView_GetCheckState(hListView, i);
 		updatedColumns.push_back(column);
 	}
 
@@ -286,12 +289,15 @@ void SelectColumnsDialog::OnLvnItemChanged(const NMLISTVIEW *pnmlv)
 		lvItem.iSubItem = 0;
 		ListView_GetItem(hListView, &lvItem);
 
-		int iDescriptionStringIndex = ShellBrowser::LookupColumnDescriptionStringIndex(
-			static_cast<ColumnType>(lvItem.lParam));
+		auto columnType =
+			ColumnType::_from_integral_nothrow(static_cast<ColumnType::_integral>(lvItem.lParam));
+		CHECK(columnType);
+		int iDescriptionStringIndex =
+			ShellBrowserImpl::LookupColumnDescriptionStringIndex(*columnType);
 
 		TCHAR szColumnDescription[128];
 		LoadString(GetResourceInstance(), iDescriptionStringIndex, szColumnDescription,
-			SIZEOF_ARRAY(szColumnDescription));
+			std::size(szColumnDescription));
 		SetDlgItemText(m_hDlg, IDC_COLUMNS_DESCRIPTION, szColumnDescription);
 	}
 }
@@ -323,7 +329,7 @@ void SelectColumnsDialog::OnMoveColumn(MoveDirection direction)
 		return;
 	}
 
-	ListViewHelper::SwapItems(listView, selectedItemIndex, newIndex, TRUE);
+	ListViewHelper::SwapItems(listView, selectedItemIndex, newIndex);
 	ListView_EnsureVisible(listView, newIndex, false);
 
 	m_bColumnsSwapped = TRUE;

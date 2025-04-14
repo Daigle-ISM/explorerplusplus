@@ -10,7 +10,8 @@ class BookmarkTree;
 
 namespace BookmarkXmlStorage
 {
-void Load(IXMLDOMDocument *xmlDocument, BookmarkTree *bookmarkTree);
-void Save(IXMLDOMDocument *xmlDocument, IXMLDOMElement *parentNode, BookmarkTree *bookmarkTree,
-	int indent);
+
+void Load(IXMLDOMNode *rootNode, BookmarkTree *bookmarkTree);
+void Save(IXMLDOMDocument *xmlDocument, IXMLDOMNode *rootNode, const BookmarkTree *bookmarkTree);
+
 }

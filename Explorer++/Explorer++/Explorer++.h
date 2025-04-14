@@ -5,62 +5,80 @@
 #pragma once
 
 #include "AcceleratorUpdater.h"
+#include "BrowserCommandController.h"
 #include "BrowserPane.h"
+#include "BrowserWindow.h"
 #include "CommandLine.h"
 #include "CoreInterface.h"
+#include "IconFetcherImpl.h"
+#include "LayoutDefaults.h"
 #include "Literals.h"
-#include "Navigator.h"
+#include "MainToolbarStorage.h"
 #include "PluginInterface.h"
 #include "Plugins/PluginCommandManager.h"
 #include "Plugins/PluginMenuManager.h"
+#include "RebarView.h"
 #include "ShellBrowser/Columns.h"
 #include "ShellBrowser/SortModes.h"
+#include "ShellIconLoaderImpl.h"
 #include "Tab.h"
 #include "TabNavigationInterface.h"
+#include "TabStorage.h"
+#include "Theme.h"
 #include "ValueWrapper.h"
-#include "../Helper/CachedIcons.h"
+#include "WindowStorage.h"
+#include "../Helper/ClipboardHelper.h"
 #include "../Helper/DropHandler.h"
 #include "../Helper/FileActionHandler.h"
-#include "../Helper/FileContextMenuManager.h"
-#include "../Helper/IconFetcher.h"
+#include "../Helper/ShellContextMenu.h"
+#include "../Helper/WeakPtr.h"
+#include "../Helper/WeakPtrFactory.h"
 #include <boost/signals2.hpp>
+#include <concurrencpp/concurrencpp.h>
 #include <wil/resource.h>
 #include <optional>
 
 /* Sent when a folder size calculation has finished. */
 #define WM_APP_FOLDERSIZECOMPLETED WM_APP + 3
 
-/* Private definitions. */
-#define FROM_LISTVIEW 0
-#define FROM_TREEVIEW 1
-
 // Forward declarations.
+class AcceleratorManager;
 class AddressBar;
+class App;
 class BookmarksMainMenu;
 class BookmarksToolbar;
-struct ColumnWidth;
+class BrowserTracker;
+class CachedIcons;
 struct Config;
+class DisplayWindow;
 class DrivesToolbar;
+class FrequentLocationsMenu;
+class HistoryMenu;
 class HolderWindow;
-class IconResourceLoader;
 __interface IDirectoryMonitor;
 class ILoadSave;
 class LoadSaveRegistry;
 class LoadSaveXML;
 class MainFontSetter;
+class MainMenuSubMenuView;
+class MainRebarView;
 class MainToolbar;
 class MainWindow;
+class MenuBase;
+class MenuView;
 struct NavigateParams;
-class ShellBrowser;
+class NavigationRequest;
+struct RebarBandStorageInfo;
+class Runtime;
+class ShellBrowserImpl;
 class ShellTreeView;
-class TabContainer;
-class TabRestorer;
-class TabRestorerUI;
+class TabContainerImpl;
+class TabRestorerMenu;
 struct TabSettings;
 class TaskbarThumbnails;
 class ThemeWindowTracker;
 class UiTheming;
-class WindowSubclassWrapper;
+class WindowSubclass;
 
 namespace Applications
 {
@@ -73,76 +91,77 @@ class PluginManager;
 }
 
 class Explorerplusplus :
+	public BrowserWindow,
 	public CoreInterface,
-	private FileContextMenuHandler,
-	public Navigator,
 	public PluginInterface,
+	private ShellContextMenuHandler,
 	public TabNavigationInterface
 {
 	friend LoadSaveRegistry;
 	friend LoadSaveXML;
 
 public:
-	Explorerplusplus(HWND hwnd, CommandLine::Settings *commandLineSettings);
+	static constexpr wchar_t WINDOW_CLASS_NAME[] = L"Explorer++";
+
+	static Explorerplusplus *Create(App *app, const WindowStorageData *storageData = nullptr);
+
 	~Explorerplusplus();
-
-	static LRESULT CALLBACK WndProcStub(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
-
-	LRESULT CALLBACK RebarSubclass(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
-
-	LRESULT CALLBACK TreeViewHolderProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
-	LRESULT CALLBACK TreeViewSubclass(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 	/* Directory modification. */
 	static void DirectoryAlteredCallback(const TCHAR *szFileName, DWORD dwAction, void *pData);
 
+	// BrowserWindow
+	int GetId() const override;
+	boost::signals2::connection AddBrowserInitializedObserver(
+		const BrowserInitializedSignal::slot_type &observer) override;
+	BrowserPane *GetActivePane() const override;
+	BrowserCommandController *GetCommandController() override;
+	void FocusActiveTab() override;
+	void CreateTabFromPreservedTab(const PreservedTab *tab) override;
+
+	// Note that there is also GetActiveShellBrowserImpl() declared below. There are some places
+	// where this method can be used, as the calling code only uses methods from the ShellBrowser
+	// interface. However, there are other places where implementation-only methods are used, in
+	// which case GetActiveShellBrowserImpl() is required. That's the reason these two methods
+	// exist.
+	ShellBrowser *GetActiveShellBrowser() override;
+
+	HWND GetHWND() const override;
+	WindowStorageData GetStorageData() const override;
+	bool IsActive() const override;
+	void Activate() override;
+	void TryClose() override;
+	void Close() override;
+
 private:
 	static constexpr UINT WM_APP_CLOSE = WM_APP + 1;
+	static constexpr UINT WM_APP_ASSOC_CHANGED = WM_APP + 2;
 
-	static const int MIN_SHELL_MENU_ID = 1;
-	static const int MAX_SHELL_MENU_ID = 1000;
+	static const int OPEN_IN_NEW_TAB_MENU_ITEM_ID = ShellContextMenu::MAX_SHELL_MENU_ID + 1;
 
-	static const UINT DISPLAY_WINDOW_MINIMUM_WIDTH = 70;
-	static const UINT DISPLAY_WINDOW_MINIMUM_HEIGHT = 70;
+	static const int DISPLAY_WINDOW_MINIMUM_WIDTH = 70_px;
+	static const int DISPLAY_WINDOW_MINIMUM_HEIGHT = 70_px;
 
-	static constexpr auto TREEVIEW_MINIMUM_WIDTH = 70_px;
+	static constexpr int TREEVIEW_MINIMUM_WIDTH = 70_px;
 	static constexpr double TREEVIEW_MAXIMUM_WIDTH_PERCENTAGE = 0.8;
 
-	/* The number of toolbars that appear in the
-	main rebar. */
-	static const int NUM_MAIN_TOOLBARS = 5;
-
-	/* Main toolbar id's. */
-	static const int ID_MAINTOOLBAR = 0;
-	static const int ID_ADDRESSTOOLBAR = 1;
-	static const int ID_BOOKMARKSTOOLBAR = 2;
-	static const int ID_DRIVESTOOLBAR = 3;
-	static const int ID_APPLICATIONSTOOLBAR = 4;
-
-	static const std::vector<std::wstring> BLACKLISTED_BACKGROUND_MENU_CLSID_ENTRIES;
-
-	static const UINT_PTR AUTOSAVE_TIMER_ID = 100000;
-	static const UINT AUTOSAVE_TIMEOUT = 30000;
-
-	static const UINT_PTR TREEVIEW_SELECTION_CHANGED_TIMER_ID = 0;
-	static const UINT TREEVIEW_SELECTION_CHANGED_TIMEOUT = 500;
+	// Main rebar band IDs. These are used to load and save data, so the values shouldn't be
+	// changed.
+	static const UINT REBAR_BAND_ID_MAIN_TOOLBAR = 0;
+	static const UINT REBAR_BAND_ID_ADDRESS_BAR = 1;
+	static const UINT REBAR_BAND_ID_BOOKMARKS_TOOLBAR = 2;
+	static const UINT REBAR_BAND_ID_DRIVES_TOOLBAR = 3;
+	static const UINT REBAR_BAND_ID_APPLICATIONS_TOOLBAR = 4;
 
 	static const UINT_PTR LISTVIEW_ITEM_CHANGED_TIMER_ID = 100001;
 	static const UINT LISTVIEW_ITEM_CHANGED_TIMEOUT = 50;
 
-	// Represents the maximum number of icons that can be cached. This cache is
-	// shared between various components in the application.
-	static const int MAX_CACHED_ICONS = 1000;
-
 	static inline constexpr COLORREF TAB_BAR_DARK_MODE_BACKGROUND_COLOR = RGB(25, 25, 25);
 
 	// When changing the font size, it will be decreased/increased by this amount.
-	static const int FONT_SIZE_CHANGE_DELTA = 2_pt;
+	static const int FONT_SIZE_CHANGE_DELTA = 1_pt;
 
-	struct FileContextMenuInfo
-	{
-		UINT uFrom;
-	};
+	static constexpr wchar_t PLUGIN_FOLDER_NAME[] = L"plugins";
 
 	struct DirectoryAltered
 	{
@@ -171,12 +190,6 @@ private:
 		int uId;
 	};
 
-	enum class PasteType
-	{
-		Normal,
-		Shortcut
-	};
-
 	enum class FocusChangeDirection
 	{
 		Previous,
@@ -189,7 +202,18 @@ private:
 		Increase
 	};
 
-	LRESULT CALLBACK WindowProcedure(HWND hwnd, UINT Msg, WPARAM wParam, LPARAM lParam);
+	struct MainMenuSubMenu
+	{
+		std::unique_ptr<MainMenuSubMenuView> view;
+		std::unique_ptr<MenuBase> menu;
+	};
+
+	Explorerplusplus(App *app, const WindowStorageData *storageData);
+
+	static HWND CreateMainWindow(const WindowStorageData *storageData);
+	static ATOM RegisterMainWindowClass(HINSTANCE instance);
+
+	LRESULT WindowProcedure(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 	static LRESULT CALLBACK ListViewProcStub(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
 		UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
@@ -200,21 +224,23 @@ private:
 	LRESULT HandleMenuOrToolbarButtonOrAccelerator(HWND hwnd, int id, UINT notificationCode);
 	LRESULT HandleControlNotification(HWND hwnd, UINT notificationCode);
 	LRESULT CALLBACK NotifyHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
-	void OnCreate();
+	void Initialize(const WindowStorageData *storageData);
 	bool OnActivate(int activationState, bool minimized);
-	void OnSize(HWND hwnd, UINT state, int mainWindowWidth, int mainWindowHeight);
+	void OnSize(UINT state);
+	static concurrencpp::null_result ScheduleUpdateLayout(WeakPtr<Explorerplusplus> self,
+		Runtime *runtime);
+	void UpdateLayout();
 	void OnDpiChanged(const RECT *updatedWindowRect);
 	std::optional<LRESULT> OnCtlColorStatic(HWND hwnd, HDC hdc);
-	void OnSettingChange(const WCHAR *systemParameter);
-	void RequestCloseApplication() override;
 	int OnDestroy();
 	void OnDeviceChange(WPARAM wParam, LPARAM lParam);
 	void OnFocusNextWindow(FocusChangeDirection direction);
 	void OnAppCommand(UINT cmd);
-	void OnDirectoryModified(const Tab &tab);
+	void OnDirectoryContentsChanged(const ShellBrowser *shellBrowser);
 	void OnAssocChanged();
 	void OnSelectTabByIndex(int iTab);
 	void OnChangeMainFontSize(FontSizeType sizeType);
+	void OnResetMainFontSize();
 
 	/* Main menu handlers. */
 	void OnNewTab();
@@ -232,7 +258,7 @@ private:
 	void OnPasteShortcut();
 	void OnWildcardSelect(BOOL bSelect);
 	void OnResolveLink();
-	void OnLockToolbars();
+	void OnToggleLockToolbars();
 	void OnChangeDisplayColors();
 	void OnFilterResults();
 	void OnSortBy(SortMode sortMode);
@@ -256,26 +282,22 @@ private:
 	void OnCheckForUpdates();
 	void OnAbout();
 
-	HRESULT OnGoBack();
-	HRESULT OnGoForward();
-	HRESULT OnGoToOffset(int offset);
-	HRESULT OnGoHome();
-	HRESULT OnGoToKnownFolder(REFKNOWNFOLDERID knownFolderId);
-	HRESULT OnGoToPath(const std::wstring &path);
-	HRESULT GoToPidl(PCIDLIST_ABSOLUTE pidl);
+	void OnGoToOffset(int offset);
+	void OnGoHome();
 
 	int HighlightSimilarFiles(HWND ListView) const;
+
+	void CreateNewWindow(const std::vector<TabStorageData> &tabs = {});
 
 	/* Main toolbar-specific handlers. */
 	void OnToolbarViews();
 
 	/* ListView private message handlers. */
+	void OnListViewClick(const NMITEMACTIVATE *eventInfo);
 	void OnListViewDoubleClick(const NMITEMACTIVATE *eventInfo);
 	LRESULT OnListViewKeyDown(LPARAM lParam);
 	void OnShowListViewContextMenu(const POINT &ptScreen);
 	void OnListViewBackgroundRClick(POINT *pCursorPos);
-	void OnListViewBackgroundRClickWindows8OrGreater(POINT *pCursorPos);
-	void OnListViewBackgroundRClickWindows7(POINT *pCursorPos);
 	void OnListViewItemRClick(POINT *pCursorPos);
 	void OnListViewCopyItemPath() const;
 	void OnListViewCopyUniversalPaths() const;
@@ -283,46 +305,36 @@ private:
 	void OnListViewPaste();
 
 	/* TreeView private message handlers. */
-	void OnShowTreeViewContextMenu(const POINT &ptScreen);
-	void OnTreeViewSelectionChanged(const NMTREEVIEW *eventInfo);
-	void HandleTreeViewSelectionChanged(const NMTREEVIEW *eventInfo);
 	void OnTreeViewCopyItemPath() const;
 	void OnTreeViewSetFileAttributes() const;
 	void OnTreeViewCopyUniversalPaths() const;
 
-	/* Holder window private message handlers. */
-	LRESULT CALLBACK TreeViewHolderWindowNotifyHandler(HWND hwnd, UINT msg, WPARAM wParam,
-		LPARAM lParam);
-	void OnTreeViewSelectionChangedTimer();
-
-	BrowserPane *GetActivePane() const;
-
 	/* Tab backing. */
 	void CreateTabBacking();
-	void OnTabsInitialized();
 	void OnTabUpdated(const Tab &tab, Tab::PropertyType propertyType);
 	void UpdateTabToolbar();
 
 	/* Tabs. */
 	void InitializeTabs();
-	boost::signals2::connection AddTabsInitializedObserver(
-		const TabsInitializedSignal::slot_type &observer) override;
-	void OnTabCreated(int tabId, BOOL switchToNewTab);
+	void OnTabCreated(const Tab &tab, bool selected);
 	void OnTabSelected(const Tab &tab);
 	void ShowTabBar() override;
 	void HideTabBar() override;
-	HRESULT RestoreTabs(ILoadSave *pLoadSave);
-	void OnTabListViewSelectionChanged(const Tab &tab);
+	void CreateInitialTabs(const WindowStorageData *storageData);
+	void CreateTabsFromStorageData(const WindowStorageData &storageData);
+	void CreateCommandLineTabs();
+	void OnTabListViewSelectionChanged(const ShellBrowser *shellBrowser);
 
 	/* TabNavigationInterface methods. */
 	void CreateNewTab(NavigateParams &navigateParams, bool selected) override;
 	void SelectTabById(int tabId) override;
 
-	void OnNavigationCommitted(const Tab &tab, const NavigateParams &navigateParams);
+	void OnNavigationCommitted(const NavigationRequest *request);
 
 	/* PluginInterface. */
 	CoreInterface *GetCoreInterface() override;
-	TabContainer *GetTabContainer() override;
+	TabEvents *GetTabEvents() override;
+	TabContainerImpl *GetTabContainerImpl() override;
 	Plugins::PluginMenuManager *GetPluginMenuManager() override;
 	UiTheming *GetUiTheming() override;
 	AcceleratorUpdater *GetAccleratorUpdater() override;
@@ -332,26 +344,32 @@ private:
 	void InitializePlugins();
 
 	/* Menus. */
-	wil::unique_hmenu InitializeRightClickMenu();
 	void SetProgramMenuItemStates(HMENU hProgramMenu);
 
-	/* Control creation. */
-	void CreateMainControls();
+	// Main rebar
+	void CreateMainRebarAndChildren(const WindowStorageData *storageData);
+	std::vector<RebarView::Band> InitializeMainRebarBands(const WindowStorageData *storageData);
+	RebarView::Band InitializeToolbarBand(UINT id, HWND toolbar, bool showBand);
+	RebarView::Band InitializeNonToolbarBand(UINT id, HWND child, bool showBand);
+	void UpdateMainRebarBandsFromLoadedInfo(std::vector<RebarView::Band> &mainRebarBands,
+		const std::vector<RebarBandStorageInfo> &rebarStorageInfo);
+	void UpdateMainRebarBandFromLoadedInfo(RebarView::Band &band,
+		const std::vector<RebarBandStorageInfo> &rebarStorageInfo);
+	LRESULT RebarSubclass(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 	void CreateFolderControls();
 	void CreateAddressBar();
-	void CreateMainToolbar();
+	void CreateMainToolbar(
+		const std::optional<MainToolbarStorage::MainToolbarButtons> &initialButtons);
 	void CreateBookmarksToolbar();
 	void CreateDrivesToolbar();
 	void CreateApplicationToolbar();
-
-	// Rebar bands
-	void InitializeMainToolbars();
 	void OnAddressBarSizeUpdated();
 	void OnRebarToolbarSizeUpdated(HWND toolbar);
 	boost::signals2::connection AddToolbarContextMenuObserver(
 		const ToolbarContextMenuSignal::slot_type &observer) override;
 	boost::signals2::connection AddToolbarContextMenuSelectedObserver(
 		const ToolbarContextMenuSelectedSignal::slot_type &observer) override;
+	HMENU CreateRebarHistoryMenu(BOOL bBack);
 
 	/* Main toolbar private message handlers. */
 	void OnToolbarRClick(HWND sourceWindow);
@@ -361,80 +379,30 @@ private:
 	void OnToggleBookmarksToolbar();
 	void OnToggleDrivesToolbar();
 	void OnToggleApplicationToolbar();
-	void OnToggleToolbar(HWND toolbar, bool show);
 	void OnCustomizeMainToolbar();
 
 	/* Settings. */
-	void SaveAllSettings() override;
-	void LoadAllSettings(ILoadSave **pLoadSave);
-	void ValidateLoadedSettings();
-	void ValidateColumns(FolderColumns &folderColumns);
-	void ValidateSingleColumnSet(int iColumnSet, std::vector<Column_t> &columns);
 	void ApplyDisplayWindowPosition();
-	void ApplyToolbarSettings();
-	void TestConfigFile();
-
-	/* Registry settings. */
-	LONG LoadGenericSettingsFromRegistry();
-	LONG SaveGenericSettingsToRegistry();
-	void SaveTabSettingsToRegistry();
-	int LoadTabSettingsFromRegistry();
-	std::vector<Column_t> LoadColumnFromRegistry(HKEY hColumnsKey, const TCHAR *szKeyName);
-	void SaveColumnToRegistry(HKEY hColumnsKey, const TCHAR *szKeyName,
-		std::vector<Column_t> *pColumns);
-	std::vector<ColumnWidth> LoadColumnWidthsFromRegistry(HKEY hColumnsKey, const TCHAR *szKeyName);
-	void SaveColumnWidthsToRegistry(HKEY hColumnsKey, const TCHAR *szKeyName,
-		std::vector<Column_t> *pColumns);
-	void LoadDefaultColumnsFromRegistry();
-	void SaveDefaultColumnsToRegistry();
-	void SaveToolbarInformationToRegistry();
-	void LoadToolbarInformationFromRegistry();
-
-	/* XML Settings. */
-	void LoadGenericSettingsFromXML(IXMLDOMDocument *pXMLDom);
-	void SaveGenericSettingsToXML(IXMLDOMDocument *pXMLDom, IXMLDOMElement *pRoot);
-	int LoadTabSettingsFromXML(IXMLDOMDocument *pXMLDom);
-	void SaveTabSettingsToXML(IXMLDOMDocument *pXMLDom, IXMLDOMElement *pRoot);
-	void SaveTabSettingsToXMLnternal(IXMLDOMDocument *pXMLDom, IXMLDOMElement *pe);
-	int LoadColumnFromXML(IXMLDOMNode *pNode, std::vector<Column_t> &outputColumns);
-	void SaveColumnToXML(IXMLDOMDocument *pXMLDom, IXMLDOMElement *pColumnsNode,
-		const std::vector<Column_t> &columns, const TCHAR *szColumnSet, int iIndent);
-	void LoadDefaultColumnsFromXML(IXMLDOMDocument *pXMLDom);
-	void SaveDefaultColumnsToXML(IXMLDOMDocument *pXMLDom, IXMLDOMElement *pRoot);
-	void SaveDefaultColumnsToXMLInternal(IXMLDOMDocument *pXMLDom, IXMLDOMElement *pColumnsNode);
-	void SaveWindowPositionToXML(IXMLDOMDocument *pXMLDom, IXMLDOMElement *pRoot);
-	void SaveWindowPositionToXMLInternal(IXMLDOMDocument *pXMLDom, IXMLDOMElement *pWndPosNode);
-	void LoadToolbarInformationFromXML(IXMLDOMDocument *pXMLDom);
-	void SaveToolbarInformationToXML(IXMLDOMDocument *pXMLDom, IXMLDOMElement *pRoot);
-	void SaveToolbarInformationToXMLnternal(IXMLDOMDocument *pXMLDom, IXMLDOMElement *pe);
-	void MapAttributeToValue(IXMLDOMNode *pNode, WCHAR *wszName, WCHAR *wszValue);
-	void MapTabAttributeValue(WCHAR *wszName, WCHAR *wszValue, TabSettings &tabSettings,
-		FolderSettings &folderSettings, bool &groupModeLoaded, bool &groupSortDirectionLoaded);
 
 	/* Window state update. */
 	void UpdateWindowStates(const Tab &tab);
-	void UpdateTreeViewSelection();
-	void SetListViewInitialPosition(HWND hListView) override;
 	void ToggleFolders();
-	void UpdateLayout();
 	void OnTreeViewHolderResized(int newWidth);
 	void ToggleDualPane();
 
 	// Status bar
 	void CreateStatusBar();
-	void SetStatusBarParts(int width);
+	LRESULT StatusBarSubclass(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+	void SetStatusBarParts();
 	void UpdateStatusBarMinHeight();
 	LRESULT StatusBarMenuSelect(WPARAM wParam, LPARAM lParam);
-	void OnNavigationStartedStatusBar(const Tab &tab, const NavigateParams &navigateParams);
+	void OnNavigationStartedStatusBar(const NavigationRequest *request);
 	void SetStatusBarLoadingText(PCIDLIST_ABSOLUTE pidl);
-	void OnNavigationCompletedStatusBar(const Tab &tab, const NavigateParams &navigateParams);
-	void OnNavigationFailedStatusBar(const Tab &tab, const NavigateParams &navigateParams);
-	HRESULT UpdateStatusBarText(const Tab &tab);
+	void OnNavigationFailedStatusBar(const NavigationRequest *request);
+	void OnNavigationCancelledStatusBar(const NavigationRequest *request);
+	void OnNavigationsStoppedStatusBar(const ShellBrowser *shellBrowser);
+	void UpdateStatusBarText(const Tab &tab);
 	std::wstring CreateDriveFreeSpaceString(const std::wstring &path);
-
-	/* Languages. */
-	void SetLanguageModule();
-	BOOL VerifyLanguageVersion(const TCHAR *szLanguageModule) const;
 
 	/* File operations. */
 	void CopyToFolder(bool move);
@@ -444,32 +412,37 @@ private:
 		OpenFolderDisposition openFolderDisposition = OpenFolderDisposition::CurrentTab);
 
 	// Navigator
+	using Navigator::OpenDefaultItem;
+	using Navigator::OpenItem;
+	void OpenDefaultItem(OpenFolderDisposition openFolderDisposition) override;
 	void OpenItem(const std::wstring &itemPath,
-		OpenFolderDisposition openFolderDisposition = OpenFolderDisposition::CurrentTab) override;
-	void OpenItem(PCIDLIST_ABSOLUTE pidlItem,
-		OpenFolderDisposition openFolderDisposition = OpenFolderDisposition::CurrentTab) override;
-	OpenFolderDisposition DetermineOpenDisposition(bool isMiddleButtonDown, bool isCtrlKeyDown,
-		bool isShiftKeyDown) override;
+		OpenFolderDisposition openFolderDisposition) override;
+	void OpenItem(PCIDLIST_ABSOLUTE pidlItem, OpenFolderDisposition openFolderDisposition) override;
+
+	void OpenShortcutItem(PCIDLIST_ABSOLUTE pidlItem, OpenFolderDisposition openFolderDisposition);
+	bool ShouldOpenContainerFile(PCIDLIST_ABSOLUTE pidlItem);
 
 	void OpenFolderItem(PCIDLIST_ABSOLUTE pidlItem,
 		OpenFolderDisposition openFolderDisposition = OpenFolderDisposition::CurrentTab);
-	void OpenFileItem(PCIDLIST_ABSOLUTE pidlItem, const TCHAR *szParameters) override;
+	void OpenFileItem(const std::wstring &itemPath, const std::wstring &parameters) override;
+	void OpenFileItem(PCIDLIST_ABSOLUTE pidl, const std::wstring &parameters) override;
 
 	void OpenDirectoryInNewWindow(PCIDLIST_ABSOLUTE pidlDirectory);
-	HRESULT OnNavigateUp();
 
 	// FileContextMenuHandler
-	void UpdateMenuEntries(PCIDLIST_ABSOLUTE pidlParent,
-		const std::vector<PITEMID_CHILD> &pidlItems, DWORD_PTR dwData, IContextMenu *contextMenu,
-		HMENU hMenu) override;
-	BOOL HandleShellMenuItem(PCIDLIST_ABSOLUTE pidlParent,
-		const std::vector<PITEMID_CHILD> &pidlItems, DWORD_PTR dwData, const TCHAR *szCmd) override;
-	void HandleCustomMenuItem(PCIDLIST_ABSOLUTE pidlParent,
-		const std::vector<PITEMID_CHILD> &pidlItems, int iCmd) override;
+	void UpdateMenuEntries(HMENU menu, PCIDLIST_ABSOLUTE pidlParent,
+		const std::vector<PidlChild> &pidlItems, IContextMenu *contextMenu) override;
+	std::wstring GetHelpTextForItem(UINT menuItemId) override;
+	bool HandleShellMenuItem(PCIDLIST_ABSOLUTE pidlParent, const std::vector<PidlChild> &pidlItems,
+		const std::wstring &verb) override;
+	void HandleCustomMenuItem(PCIDLIST_ABSOLUTE pidlParent, const std::vector<PidlChild> &pidlItems,
+		UINT menuItemId) override;
 
-	void UpdateBackgroundContextMenu(IContextMenu *contextMenu, HMENU menu);
-	void UpdateItemContextMenu(PCIDLIST_ABSOLUTE pidlParent,
-		const std::vector<PITEMID_CHILD> &pidlItems, DWORD_PTR data, HMENU menu);
+	void UpdateBackgroundContextMenu(HMENU menu, PCIDLIST_ABSOLUTE folderPidl,
+		IContextMenu *contextMenu);
+	void RemoveNonFunctionalItemsFromBackgroundContextMenu(HMENU menu, IContextMenu *contextMenu);
+	void UpdateItemContextMenu(HMENU menu, PCIDLIST_ABSOLUTE pidlParent,
+		const std::vector<PidlChild> &pidlItems);
 
 	/* File selection tests. */
 	BOOL AnyItemsSelected() const;
@@ -479,12 +452,11 @@ private:
 	BOOL CanRename() const override;
 	BOOL CanDelete() const override;
 	BOOL CanShowFileProperties() const override;
-	BOOL CanPaste() const override;
-	BOOL CanPasteShortcut() const;
-	BOOL CanPasteShellData(PasteType pastType) const;
-	BOOL CanPasteCustomData() const;
+	BOOL CanPaste(PasteType pasteType) const override;
+	bool CanPasteLink() const;
 	BOOL TestItemAttributes(SFGAOF attributes) const;
 	HRESULT GetSelectionAttributes(SFGAOF *pItemAttributes) const;
+	PidlAbsolute MaybeGetFocusedDirectory() const;
 
 	HRESULT GetTreeViewSelectionAttributes(SFGAOF *pItemAttributes) const;
 
@@ -502,41 +474,36 @@ private:
 	/* CoreInterface methods. */
 	const Config *GetConfig() const override;
 	HINSTANCE GetResourceInstance() const override;
-	HACCEL *GetAcceleratorTable() const override;
 	HWND GetMainWindow() const override;
-	HWND GetActiveListView() const override;
-	ShellBrowser *GetActiveShellBrowser() const override;
-	TabContainer *GetTabContainer() const override;
-	TabRestorer *GetTabRestorer() const override;
+	ShellBrowserImpl *GetActiveShellBrowserImpl() const override;
+	TabContainerImpl *GetTabContainerImpl() const override;
 	HWND GetTreeView() const override;
 	std::wstring GetCurrentFolder() const override;
 	IDirectoryMonitor *GetDirectoryMonitor() const override;
-	IconResourceLoader *GetIconResourceLoader() const override;
 	CachedIcons *GetCachedIcons() override;
-	BOOL GetSavePreferencesToXmlFile() const override;
-	void SetSavePreferencesToXmlFile(BOOL savePreferencesToXmlFile) override;
 	void FocusChanged() override;
 	boost::signals2::connection AddFocusChangeObserver(
 		const FocusChangedSignal::slot_type &observer) override;
 	boost::signals2::connection AddDeviceChangeObserver(
 		const DeviceChangeSignal::slot_type &observer) override;
-	boost::signals2::connection AddApplicationShuttingDownObserver(
-		const ApplicationShuttingDownSignal::slot_type &observer) override;
-	void FocusActiveTab() override;
 
 	/* Menus. */
 	void InitializeMainMenu();
 	void SetMainMenuImages();
+	void SetPasteSymLinkElevationIcon();
 	void InitializeGoMenu(HMENU mainMenu);
 	void AddGoMenuItem(HMENU goMenu, UINT id, const KNOWNFOLDERID &folderId);
 	void AddGoMenuItem(HMENU goMenu, UINT id, const std::wstring &path);
 	void AddGoMenuItem(HMENU goMenu, UINT id, PCIDLIST_ABSOLUTE pidl);
+	void AddMainMenuSubmenu(HMENU mainMenu, UINT subMenuItemId,
+		std::function<std::unique_ptr<MenuBase>(MenuView *menuView)> menuCreator);
 	boost::signals2::connection AddMainMenuPreShowObserver(
 		const MainMenuPreShowSignal::slot_type &observer) override;
 	wil::unique_hmenu BuildViewsMenu() override;
 	void AddViewModesToMenu(HMENU menu, UINT startPosition, BOOL byPosition);
 	void OnInitMenu(HMENU menu);
 	void OnExitMenuLoop(bool shortcutMenu);
+	bool MaybeHandleMainMenuItemSelection(UINT id);
 	boost::signals2::connection AddMainMenuItemMiddleClickedObserver(
 		const MainMenuItemMiddleClickedSignal::slot_type &observer) override;
 	void OnMenuMiddleButtonUp(const POINT &pt, bool isCtrlKeyDown, bool isShiftKeyDown);
@@ -545,20 +512,11 @@ private:
 	void OnMenuRightButtonUp(HMENU menu, int index, const POINT &pt);
 	boost::signals2::connection AddGetMenuItemHelperTextObserver(
 		const GetMenuItemHelperTextSignal::slot_type &observer) override;
-
-	// Dark mode
-	static bool ShouldEnableDarkMode(Theme theme);
-	void OnThemeUpdated(Theme theme);
-
-	// Rebar
-	HMENU CreateRebarHistoryMenu(BOOL bBack);
-
-	// Customize colors
-	void InitializeDefaultColorRules();
+	std::optional<std::wstring> MaybeGetMenuItemHelperText(HMENU menu, int id);
+	MainMenuSubMenu *MaybeGetMainMenuSubMenuFromId(UINT id);
 
 	/* Miscellaneous. */
 	void InitializeDisplayWindow();
-	void ShowMainRebarBand(HWND hwnd, BOOL bShow);
 	StatusBar *GetStatusBar() override;
 	void StartDirectoryMonitoringForTab(const Tab &tab);
 	void StopDirectoryMonitoringForTab(const Tab &tab);
@@ -569,12 +527,18 @@ private:
 	void FolderSizeCallback(FolderSizeExtraInfo *pfsei, int nFolders, int nFiles,
 		PULARGE_INTEGER lTotalFolderSize);
 
-	CommandLine::Settings m_commandLineSettings;
+	bool ConfirmClose();
 
+	static inline int idCounter = 1;
+	const int m_id;
+
+	App *const m_app;
 	HWND m_hContainer;
+	std::unique_ptr<BrowserTracker> m_browserTracker;
+
+	BrowserCommandController m_commandController;
+
 	HWND m_hStatusBar;
-	HWND m_hMainRebar;
-	HWND m_hDisplayWindow;
 	HWND m_hTabBacking;
 
 	HWND m_hTabWindowToolbar;
@@ -582,50 +546,48 @@ private:
 
 	IDirectoryMonitor *m_pDirMon;
 
-	HINSTANCE m_resourceInstance;
-
 	/** Internal state. **/
 	HWND m_lastActiveWindow;
-	bool m_bAttemptToolbarRestore;
-	bool m_bLanguageLoaded;
 	bool m_bShowTabBar;
-	int m_iLastSelectedTab = 0;
 	ULONG m_SHChangeNotifyID;
-	ValueWrapper<bool> m_InitializationFinished;
+
+#if DCHECK_IS_ON()
+	bool m_performingLayout = false;
+#endif
 
 	/* Initialization. */
-	BOOL m_bLoadSettingsFromXML;
+	bool m_browserInitialized = false;
+	BrowserInitializedSignal m_browserInitializedSignal;
 
-	MainWindow *m_mainWindow;
-	AddressBar *m_addressBar;
+	MainWindow *m_mainWindow = nullptr;
+	AddressBar *m_addressBar = nullptr;
 
-	std::unique_ptr<IconResourceLoader> m_iconResourceLoader;
+	DisplayWindow *m_displayWindow = nullptr;
+	int m_displayWindowWidth = LayoutDefaults::DEFAULT_DISPLAY_WINDOW_WIDTH;
+	int m_displayWindowHeight = LayoutDefaults::DEFAULT_DISPLAY_WINDOW_HEIGHT;
 
-	CachedIcons m_cachedIcons;
-
+	wil::com_ptr_nothrow<IImageList> m_mainMenuSystemImageList;
+	std::vector<wil::unique_hbitmap> m_mainMenuImages;
 	MainMenuPreShowSignal m_mainMenuPreShowSignal;
 	MainMenuItemMiddleClickedSignal m_mainMenuItemMiddleClickedSignal;
 	MainMenuItemRightClickedSignal m_mainMenuItemRightClickedSignal;
 	bool m_mainMenuShowing = false;
 	GetMenuItemHelperTextSignal m_getMenuItemHelperTextSignal;
+	std::vector<MainMenuSubMenu> m_mainMenuSubMenus;
+
 	FocusChangedSignal m_focusChangedSignal;
-	ApplicationShuttingDownSignal m_applicationShuttingDownSignal;
-	bool m_applicationShuttingDown = false;
+	bool m_browserClosing = false;
 
 	// Treeview
 	HolderWindow *m_treeViewHolder = nullptr;
 	ShellTreeView *m_shellTreeView = nullptr;
-	std::optional<NMTREEVIEW> m_treeViewSelectionChangedEventInfo;
-	bool m_treeViewInitialized = false;
+	int m_treeViewWidth = LayoutDefaults::DEFAULT_TREEVIEW_WIDTH;
 
 	std::unique_ptr<BrowserPane> m_browserPane;
 
 	/* Tabs. */
 	std::unique_ptr<MainFontSetter> m_tabToolbarTooltipFontSetter;
 	wil::unique_hbrush m_tabBarBackgroundBrush;
-	std::unique_ptr<TabRestorer> m_tabRestorer;
-	std::unique_ptr<TabRestorerUI> m_tabRestorerUI;
-	TabsInitializedSignal m_tabsInitializedSignal;
 
 	ToolbarContextMenuSignal m_toolbarContextMenuSignal;
 	ToolbarContextMenuSelectedSignal m_toolbarContextMenuSelectedSignal;
@@ -641,18 +603,14 @@ private:
 	Plugins::PluginCommandManager m_pluginCommandManager;
 
 	HWND m_hActiveListView;
-	ShellBrowser *m_pActiveShellBrowser;
+	ShellBrowserImpl *m_pActiveShellBrowser;
 
 	/* User options variables. */
-	std::shared_ptr<Config> m_config;
-	BOOL m_bSavePreferencesToXMLFile;
+	Config *const m_config;
 
-	bool m_themeValueLoadedFromXml = false;
-	bool m_groupSortDirectionGlobalLoadedFromXml = false;
+	std::unique_ptr<TaskbarThumbnails> m_taskbarThumbnails;
 
-	TaskbarThumbnails *m_taskbarThumbnails;
-
-	std::vector<std::unique_ptr<WindowSubclassWrapper>> m_windowSubclasses;
+	std::vector<std::unique_ptr<WindowSubclass>> m_windowSubclasses;
 	std::vector<boost::signals2::scoped_connection> m_connections;
 
 	/* Bookmarks. */
@@ -675,13 +633,17 @@ private:
 	// Ideally, it would be better to cancel operations that are running in the background thread,
 	// but as far as I'm aware, it's not possible to cancel SHGetFileInfo (which is what's
 	// ultimately used to retrieve the icons).
-	IconFetcher m_bookmarkIconFetcher;
+	IconFetcherImpl m_iconFetcher;
+	ShellIconLoaderImpl m_shellIconLoader;
 
 	/* Undo support. */
 	FileActionHandler m_FileActionHandler;
 
+	// Main rebar
+	MainRebarView *m_mainRebarView = nullptr;
+	std::vector<boost::signals2::scoped_connection> m_rebarConnections;
+
 	/* Toolbars. */
-	REBARBANDINFO m_ToolbarInformation[NUM_MAIN_TOOLBARS];
 	MainToolbar *m_mainToolbar;
 	DrivesToolbar *m_drivesToolbar = nullptr;
 	Applications::ApplicationToolbar *m_applicationToolbar = nullptr;
@@ -690,13 +652,12 @@ private:
 	std::list<DWFolderSize> m_DWFolderSizes;
 	int m_iDWFolderSizeUniqueId;
 
-	/* Menu images. */
-	std::vector<wil::unique_hbitmap> m_menuImages;
-
 	// WM_DEVICECHANGE notifications
 	DeviceChangeSignal m_deviceChangeSignal;
 
 	// Status bar
 	StatusBar *m_pStatusBar = nullptr;
 	std::unique_ptr<MainFontSetter> m_statusBarFontSetter;
+
+	WeakPtrFactory<Explorerplusplus> m_weakPtrFactory;
 };

@@ -10,24 +10,23 @@
     <ClCompile Include="BookmarkTreeTest.cpp">
       <Filter>Bookmarks</Filter>
     </ClCompile>
-    <ClCompile Include="ViewModeHelperTest.cpp" />
     <ClCompile Include="ShellNavigationControllerTest.cpp">
       <Filter>ShellBrowser</Filter>
     </ClCompile>
     <ClCompile Include="BookmarkDropperTest.cpp">
       <Filter>Bookmarks</Filter>
     </ClCompile>
-    <ClCompile Include="ApplicationToolbarHelperTest.cpp">
+    <ClCompile Include="ApplicationHelperTest.cpp">
       <Filter>Application Toolbar</Filter>
     </ClCompile>
     <ClCompile Include="BookmarkXmlStorageTest.cpp">
       <Filter>Bookmarks</Filter>
     </ClCompile>
-    <ClCompile Include="ResourceHelper.cpp" />
+    <ClCompile Include="ResourceTestHelper.cpp" />
     <ClCompile Include="BookmarkRegistryStorageTest.cpp">
       <Filter>Bookmarks</Filter>
     </ClCompile>
-    <ClCompile Include="BookmarkStorageHelper.cpp">
+    <ClCompile Include="BookmarkStorageTestHelper.cpp">
       <Filter>Bookmarks</Filter>
     </ClCompile>
     <ClCompile Include="ManifestTest.cpp">
@@ -48,13 +47,13 @@
     <ClCompile Include="ApplicationToolbarRegistryStorageTest.cpp">
       <Filter>Application Toolbar</Filter>
     </ClCompile>
-    <ClCompile Include="ApplicationToolbarStorageHelper.cpp">
+    <ClCompile Include="ApplicationToolbarStorageTestHelper.cpp">
       <Filter>Application Toolbar</Filter>
     </ClCompile>
-    <ClCompile Include="XmlStorageHelper.cpp">
+    <ClCompile Include="XmlStorageTestHelper.cpp">
       <Filter>Storage</Filter>
     </ClCompile>
-    <ClCompile Include="RegistryStorageHelper.cpp">
+    <ClCompile Include="RegistryStorageTestHelper.cpp">
       <Filter>Storage</Filter>
     </ClCompile>
     <ClCompile Include="CachedIconsTest.cpp">
@@ -79,7 +78,7 @@
     <ClCompile Include="ColorRuleRegistryStorageTest.cpp">
       <Filter>Color Rules</Filter>
     </ClCompile>
-    <ClCompile Include="ColorRulesStorageHelper.cpp">
+    <ClCompile Include="ColorRulesStorageTestHelper.cpp">
       <Filter>Color Rules</Filter>
     </ClCompile>
     <ClCompile Include="ColorRuleXmlStorageTest.cpp">
@@ -108,6 +107,277 @@
     </ClCompile>
     <ClCompile Include="CustomFontStorageTest.cpp">
       <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="OneShotTimerTest.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="BrowserCommandControllerTest.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="ShellBrowserFake.cpp">
+      <Filter>ShellBrowser</Filter>
+    </ClCompile>
+    <ClCompile Include="MainRebarRegistryStorageTest.cpp">
+      <Filter>Main Rebar</Filter>
+    </ClCompile>
+    <ClCompile Include="MainRebarStorageTestHelper.cpp">
+      <Filter>Main Rebar</Filter>
+    </ClCompile>
+    <ClCompile Include="MainRebarXmlStorageTest.cpp">
+      <Filter>Main Rebar</Filter>
+    </ClCompile>
+    <ClCompile Include="TabRegistryStorageTest.cpp">
+      <Filter>Tabs</Filter>
+    </ClCompile>
+    <ClCompile Include="TabXmlStorageTest.cpp">
+      <Filter>Tabs</Filter>
+    </ClCompile>
+    <ClCompile Include="TabStorageTestHelper.cpp">
+      <Filter>Tabs</Filter>
+    </ClCompile>
+    <ClCompile Include="ApplicationDropperTest.cpp">
+      <Filter>Application Toolbar</Filter>
+    </ClCompile>
+    <ClCompile Include="DragDropTestHelper.cpp" />
+    <ClCompile Include="Main.cpp" />
+    <ClCompile Include="ViewModeHelperTest.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="MainToolbarStorageTest.cpp">
+      <Filter>Main Toolbar</Filter>
+    </ClCompile>
+    <ClCompile Include="ImageHelperTest.cpp">
+      <Filter>Helper\Miscellaneous</Filter>
+    </ClCompile>
+    <ClCompile Include="ResourceHelperTest.cpp">
+      <Filter>Helper\Miscellaneous</Filter>
+    </ClCompile>
+    <ClCompile Include="ServiceProviderTest.cpp">
+      <Filter>Context Menu Support</Filter>
+    </ClCompile>
+    <ClCompile Include="TabHistoryMenuTest.cpp">
+      <Filter>Core\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="ShellItemsMenuTest.cpp">
+      <Filter>Core\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="MenuHelperTest.cpp">
+      <Filter>Helper\Control Support</Filter>
+    </ClCompile>
+    <ClCompile Include="PopupMenuViewTest.cpp">
+      <Filter>Core\UI\Views</Filter>
+    </ClCompile>
+    <ClCompile Include="HistoryModelTest.cpp">
+      <Filter>History</Filter>
+    </ClCompile>
+    <ClCompile Include="ShellTestHelper.cpp" />
+    <ClCompile Include="FrequentLocationsModelTest.cpp">
+      <Filter>Frequent Locations</Filter>
+    </ClCompile>
+    <ClCompile Include="DragDropHelperTest.cpp">
+      <Filter>Helper\Data Exchange\Drag and Drop</Filter>
+    </ClCompile>
+    <ClCompile Include="PasteSymLinksServerClientTest.cpp">
+      <Filter>Data Exchange\Clipboard</Filter>
+    </ClCompile>
+    <ClCompile Include="CommandLineSplitterTest.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="DataExchangeHelperTest.cpp">
+      <Filter>Helper\Data Exchange</Filter>
+    </ClCompile>
+    <ClCompile Include="ImageTestHelper.cpp" />
+    <ClCompile Include="VersionTest.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="VersionHelperTest.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="AcceleratorHelperTest.cpp">
+      <Filter>Core\Accelerators</Filter>
+    </ClCompile>
+    <ClCompile Include="AcceleratorManagerTest.cpp">
+      <Filter>Core\Accelerators</Filter>
+    </ClCompile>
+    <ClCompile Include="AcceleratorTestHelper.cpp">
+      <Filter>Core\Accelerators</Filter>
+    </ClCompile>
+    <ClCompile Include="ShellIconLoaderFake.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="UIThreadExecutorTest.cpp">
+      <Filter>Async\Executors</Filter>
+    </ClCompile>
+    <ClCompile Include="ComStaThreadPoolExecutorTest.cpp">
+      <Filter>Async\Executors</Filter>
+    </ClCompile>
+    <ClCompile Include="ExecutorTestBase.cpp">
+      <Filter>Async\Executors</Filter>
+    </ClCompile>
+    <ClCompile Include="ExecutorTestHelper.cpp">
+      <Filter>Async\Executors</Filter>
+    </ClCompile>
+    <ClCompile Include="RuntimeTest.cpp">
+      <Filter>Async</Filter>
+    </ClCompile>
+    <ClCompile Include="RuntimeHelperTest.cpp">
+      <Filter>Async</Filter>
+    </ClCompile>
+    <ClCompile Include="AsyncIconFetcherTest.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="RuntimeTestHelper.cpp">
+      <Filter>Async</Filter>
+    </ClCompile>
+    <ClCompile Include="MessageLoop.cpp">
+      <Filter>Async</Filter>
+    </ClCompile>
+    <ClCompile Include="CommandLineTest.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="BrowserTrackerTest.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="FeatureListTest.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="BrowserListTest.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="ModelessDialogListTest.cpp">
+      <Filter>Dialog Support</Filter>
+    </ClCompile>
+    <ClCompile Include="ColumnRegistryStorageTest.cpp">
+      <Filter>Column Storage</Filter>
+    </ClCompile>
+    <ClCompile Include="ColumnStorageTest.cpp">
+      <Filter>Column Storage</Filter>
+    </ClCompile>
+    <ClCompile Include="ColumnStorageTestHelper.cpp">
+      <Filter>Column Storage</Filter>
+    </ClCompile>
+    <ClCompile Include="ColumnXmlStorageTest.cpp">
+      <Filter>Column Storage</Filter>
+    </ClCompile>
+    <ClCompile Include="DefaultColumnXmlStorageTest.cpp">
+      <Filter>Column Storage</Filter>
+    </ClCompile>
+    <ClCompile Include="DefaultColumnRegistryStorageTest.cpp">
+      <Filter>Column Storage</Filter>
+    </ClCompile>
+    <ClCompile Include="WindowRegistryStorageTest.cpp">
+      <Filter>Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="WindowXmlStorageTest.cpp">
+      <Filter>Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="WindowStorageTestHelper.cpp">
+      <Filter>Windows</Filter>
+    </ClCompile>
+    <ClCompile Include="ProcessManagerTest.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="ConfigXmlStorageTest.cpp">
+      <Filter>Config</Filter>
+    </ClCompile>
+    <ClCompile Include="ConfigRegistryStorageTest.cpp">
+      <Filter>Config</Filter>
+    </ClCompile>
+    <ClCompile Include="ConfigStorageTestHelper.cpp">
+      <Filter>Config</Filter>
+    </ClCompile>
+    <ClCompile Include="LanguageHelperTest.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="TabRestorerTest.cpp">
+      <Filter>Tabs</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveEnumeratorImplTest.cpp">
+      <Filter>Drives Toolbar</Filter>
+    </ClCompile>
+    <ClCompile Include="FrequentLocationsXmlStorageTest.cpp">
+      <Filter>Frequent Locations</Filter>
+    </ClCompile>
+    <ClCompile Include="FrequentLocationsRegistryStorageTest.cpp">
+      <Filter>Frequent Locations</Filter>
+    </ClCompile>
+    <ClCompile Include="FrequentLocationsStorageTestHelper.cpp">
+      <Filter>Frequent Locations</Filter>
+    </ClCompile>
+    <ClCompile Include="FakeSystemClock.cpp">
+      <Filter>Helper\Miscellaneous</Filter>
+    </ClCompile>
+    <ClCompile Include="HistoryMenuTest.cpp">
+      <Filter>History\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="FrequentLocationsMenuTest.cpp">
+      <Filter>Frequent Locations\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="BrowserWindowMock.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="TabRestorerMenuTest.cpp">
+      <Filter>Tabs\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="PopupMenuViewTestHelper.cpp">
+      <Filter>Core\UI\Views</Filter>
+    </ClCompile>
+    <ClCompile Include="XMLSettingsTest.cpp">
+      <Filter>Helper\Settings</Filter>
+    </ClCompile>
+    <ClCompile Include="ScopedStopSourceTest.cpp">
+      <Filter>Helper\Miscellaneous</Filter>
+    </ClCompile>
+    <ClCompile Include="WeakPtrFactoryTest.cpp">
+      <Filter>Helper\Memory</Filter>
+    </ClCompile>
+    <ClCompile Include="ListViewHelperTest.cpp">
+      <Filter>Helper\Control Support</Filter>
+    </ClCompile>
+    <ClCompile Include="StartupFoldersRegistryStorageTest.cpp">
+      <Filter>Startup</Filter>
+    </ClCompile>
+    <ClCompile Include="StartupFoldersStorageTestHelper.cpp">
+      <Filter>Startup</Filter>
+    </ClCompile>
+    <ClCompile Include="StartupFoldersXmlStorageTest.cpp">
+      <Filter>Startup</Filter>
+    </ClCompile>
+    <ClCompile Include="ScopedRedrawDisablerTest.cpp">
+      <Filter>Helper\Control Support</Filter>
+    </ClCompile>
+    <ClCompile Include="WindowHelperTest.cpp">
+      <Filter>Helper\Control Support</Filter>
+    </ClCompile>
+    <ClCompile Include="WindowSubclassTest.cpp">
+      <Filter>Helper\Control Support</Filter>
+    </ClCompile>
+    <ClCompile Include="NavigationManagerTest.cpp">
+      <Filter>ShellBrowser</Filter>
+    </ClCompile>
+    <ClCompile Include="ShellEnumeratorImplTest.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="ShellEnumeratorFake.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="NavigationRequestTest.cpp">
+      <Filter>ShellBrowser</Filter>
+    </ClCompile>
+    <ClCompile Include="TabEventsTest.cpp">
+      <Filter>Tabs</Filter>
+    </ClCompile>
+    <ClCompile Include="NavigationEventsTest.cpp">
+      <Filter>ShellBrowser</Filter>
+    </ClCompile>
+    <ClCompile Include="ShellBrowserEventsTest.cpp">
+      <Filter>ShellBrowser</Filter>
+    </ClCompile>
+    <ClCompile Include="FrequentLocationsTrackerTest.cpp">
+      <Filter>Frequent Locations</Filter>
+    </ClCompile>
+    <ClCompile Include="HistoryTrackerTest.cpp">
+      <Filter>History</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -165,9 +435,75 @@
     <Filter Include="Core">
       <UniqueIdentifier>{809ce47f-d408-403f-8be2-2b4c3c7de69a}</UniqueIdentifier>
     </Filter>
+    <Filter Include="History">
+      <UniqueIdentifier>{e02a8fdc-5c31-4cb1-9bd5-c1f3d9450e51}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Main Rebar">
+      <UniqueIdentifier>{37c140aa-7806-46a2-b067-48685d705ce9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Main Toolbar">
+      <UniqueIdentifier>{c61de3f5-5b11-4d9f-880d-4afcb5363ac6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Context Menu Support">
+      <UniqueIdentifier>{eadab4ea-5008-4359-9e40-273fa813fba8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Core\UI">
+      <UniqueIdentifier>{7af7278c-c56b-48b1-b069-4346b3f79c17}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Core\UI\Views">
+      <UniqueIdentifier>{b80d11e6-4361-4b55-9b78-470549e95b2f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Frequent Locations">
+      <UniqueIdentifier>{608f3f32-fe72-473c-af0b-a9acec71dfcd}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Data Exchange">
+      <UniqueIdentifier>{076a2725-31ce-44cf-a4be-99f710f72705}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Data Exchange\Clipboard">
+      <UniqueIdentifier>{5c4bd6f7-12e3-4e04-a155-20a51b38b5fc}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Core\Accelerators">
+      <UniqueIdentifier>{8573b1f7-785d-4e8a-8646-136d0fd51cbd}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Async">
+      <UniqueIdentifier>{cfea53f6-fa8f-44e2-bab6-aec5d3922741}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Async\Executors">
+      <UniqueIdentifier>{de6aab16-37e4-436f-817b-780f1e35ee98}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Dialog Support">
+      <UniqueIdentifier>{c92534bc-73a2-4e24-8f9d-d7552e2acd5b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Column Storage">
+      <UniqueIdentifier>{99c509cf-2bb8-492a-8fdb-e3a588b04f69}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Windows">
+      <UniqueIdentifier>{099d031f-db3c-4d82-87a6-265361e70edf}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Config">
+      <UniqueIdentifier>{1980882f-109e-4b79-a547-fea9e4850a36}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="History\UI">
+      <UniqueIdentifier>{46628916-124c-461d-bc7d-7635eca44dd9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Frequent Locations\UI">
+      <UniqueIdentifier>{8f212825-3607-46ff-93d5-923ccbadd20e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Tabs\UI">
+      <UniqueIdentifier>{9fe87dea-7e4f-4630-b9f2-ba3b33711d06}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Helper\Memory">
+      <UniqueIdentifier>{b1564aac-148a-409b-ad02-26644ee30151}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Startup">
+      <UniqueIdentifier>{968bad65-061e-4000-b384-22aac11db15a}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="TestExplorer++.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
+    <ResourceCompile Include="TestResources.rc">
       <Filter>Resource Files</Filter>
     </ResourceCompile>
   </ItemGroup>
@@ -175,25 +511,109 @@
     <ClInclude Include="BookmarkTreeHelper.h">
       <Filter>Bookmarks</Filter>
     </ClInclude>
-    <ClInclude Include="ResourceHelper.h" />
-    <ClInclude Include="BookmarkStorageHelper.h">
+    <ClInclude Include="ResourceTestHelper.h" />
+    <ClInclude Include="BookmarkStorageTestHelper.h">
       <Filter>Bookmarks</Filter>
     </ClInclude>
-    <ClInclude Include="ApplicationToolbarStorageHelper.h">
+    <ClInclude Include="ApplicationToolbarStorageTestHelper.h">
       <Filter>Application Toolbar</Filter>
     </ClInclude>
-    <ClInclude Include="RegistryStorageHelper.h">
+    <ClInclude Include="RegistryStorageTestHelper.h">
       <Filter>Storage</Filter>
     </ClInclude>
-    <ClInclude Include="XmlStorageHelper.h">
+    <ClInclude Include="XmlStorageTestHelper.h">
       <Filter>Storage</Filter>
     </ClInclude>
     <ClInclude Include="pch.h" />
-    <ClInclude Include="ColorRulesStorageHelper.h">
+    <ClInclude Include="ColorRulesStorageTestHelper.h">
       <Filter>Color Rules</Filter>
     </ClInclude>
     <ClInclude Include="MovableModelHelper.h">
       <Filter>Storage</Filter>
     </ClInclude>
+    <ClInclude Include="TabNavigationMock.h">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="ShellBrowserFake.h">
+      <Filter>ShellBrowser</Filter>
+    </ClInclude>
+    <ClInclude Include="MainRebarStorageTestHelper.h">
+      <Filter>Main Rebar</Filter>
+    </ClInclude>
+    <ClInclude Include="TabStorageTestHelper.h">
+      <Filter>Tabs</Filter>
+    </ClInclude>
+    <ClInclude Include="DragDropTestHelper.h" />
+    <ClInclude Include="TestResources.h">
+      <Filter>Resource Files</Filter>
+    </ClInclude>
+    <ClInclude Include="BrowserWindowMock.h">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="ShellTestHelper.h" />
+    <ClInclude Include="ImageTestHelper.h" />
+    <ClInclude Include="AcceleratorTestHelper.h">
+      <Filter>Core\Accelerators</Filter>
+    </ClInclude>
+    <ClInclude Include="ShellIconLoaderFake.h">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="ExecutorTestBase.h">
+      <Filter>Async\Executors</Filter>
+    </ClInclude>
+    <ClInclude Include="ExecutorTestHelper.h">
+      <Filter>Async\Executors</Filter>
+    </ClInclude>
+    <ClInclude Include="RuntimeTestHelper.h">
+      <Filter>Async</Filter>
+    </ClInclude>
+    <ClInclude Include="MessageLoop.h">
+      <Filter>Async</Filter>
+    </ClInclude>
+    <ClInclude Include="GeneratorTestHelper.h">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="ColumnStorageTestHelper.h">
+      <Filter>Column Storage</Filter>
+    </ClInclude>
+    <ClInclude Include="WindowStorageTestHelper.h">
+      <Filter>Windows</Filter>
+    </ClInclude>
+    <ClInclude Include="StorageTestHelper.h">
+      <Filter>Storage</Filter>
+    </ClInclude>
+    <ClInclude Include="ConfigStorageTestHelper.h">
+      <Filter>Config</Filter>
+    </ClInclude>
+    <ClInclude Include="FrequentLocationsStorageTestHelper.h">
+      <Filter>Frequent Locations</Filter>
+    </ClInclude>
+    <ClInclude Include="FakeSystemClock.h">
+      <Filter>Helper\Miscellaneous</Filter>
+    </ClInclude>
+    <ClInclude Include="PopupMenuViewTestHelper.h">
+      <Filter>Core\UI\Views</Filter>
+    </ClInclude>
+    <ClInclude Include="GTestHelper.h" />
+    <ClInclude Include="StartupFoldersStorageTestHelper.h">
+      <Filter>Startup</Filter>
+    </ClInclude>
+    <ClInclude Include="ShellEnumeratorFake.h">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="NavigationRequestTestHelper.h">
+      <Filter>ShellBrowser</Filter>
+    </ClInclude>
+    <ClInclude Include="NavigationRequestDelegateMock.h">
+      <Filter>ShellBrowser</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="EmbeddedResources\basic.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+  </ItemGroup>
+  <ItemGroup>
+    <Manifest Include="compatibility.manifest" />
   </ItemGroup>
 </Project>

@@ -4,7 +4,6 @@
 
 #include "stdafx.h"
 #include "StringHelper.h"
-#include "Macros.h"
 #include <codecvt>
 
 BOOL CheckWildcardMatchInternal(const TCHAR *szWildcard, const TCHAR *szString,
@@ -18,7 +17,7 @@ std::wstring FormatSizeString(uint64_t size, SizeDisplayFormat sizeDisplayFormat
 	auto sizeAsDouble = static_cast<double>(size);
 	int sizeIndex = 0;
 
-	if (sizeDisplayFormat != SizeDisplayFormat::None)
+	if (sizeDisplayFormat != +SizeDisplayFormat::None)
 	{
 		switch (sizeDisplayFormat)
 		{
@@ -61,7 +60,7 @@ std::wstring FormatSizeString(uint64_t size, SizeDisplayFormat sizeDisplayFormat
 			sizeIndex++;
 		}
 
-		if (sizeIndex > (SIZEOF_ARRAY(SIZE_STRINGS) - 1))
+		if (sizeIndex > (std::size(SIZE_STRINGS) - 1))
 		{
 			return {};
 		}
@@ -135,7 +134,7 @@ BOOL CheckWildcardMatch(const TCHAR *szWildcard, const TCHAR *szString, BOOL bCa
 		TCHAR *szSearchPattern = nullptr;
 		TCHAR *szRemainingPattern = nullptr;
 
-		StringCchCopy(szWildcardPattern, SIZEOF_ARRAY(szWildcardPattern), szWildcard);
+		StringCchCopy(szWildcardPattern, std::size(szWildcardPattern), szWildcard);
 
 		szSinglePattern = wcstok_s(szWildcardPattern, _T(":"), &szRemainingPattern);
 		PathRemoveBlanks(szSinglePattern);
@@ -214,11 +213,11 @@ BOOL CheckWildcardMatchInternal(const TCHAR *szWildcard, const TCHAR *szString, 
 			{
 				TCHAR szCharacter1[1];
 				LCMapString(LOCALE_USER_DEFAULT, LCMAP_LOWERCASE, szWildcard, 1, szCharacter1,
-					SIZEOF_ARRAY(szCharacter1));
+					std::size(szCharacter1));
 
 				TCHAR szCharacter2[1];
 				LCMapString(LOCALE_USER_DEFAULT, LCMAP_LOWERCASE, szString, 1, szCharacter2,
-					SIZEOF_ARRAY(szCharacter2));
+					std::size(szCharacter2));
 
 				bCurrentMatch = (szCharacter1[0] == szCharacter2[0]);
 			}
@@ -269,14 +268,14 @@ void ReplaceCharacterWithString(const TCHAR *szBaseString, TCHAR *szOutput, UINT
 	{
 		if (szBaseString[i] == chToReplace)
 		{
-			StringCchCatN(szNewString, SIZEOF_ARRAY(szNewString), &szBaseString[iBase], i - iBase);
-			StringCchCat(szNewString, SIZEOF_ARRAY(szNewString), szReplacement);
+			StringCchCatN(szNewString, std::size(szNewString), &szBaseString[iBase], i - iBase);
+			StringCchCat(szNewString, std::size(szNewString), szReplacement);
 
 			iBase = i + 1;
 		}
 	}
 
-	StringCchCatN(szNewString, SIZEOF_ARRAY(szNewString), &szBaseString[iBase], i - iBase);
+	StringCchCatN(szNewString, std::size(szNewString), &szBaseString[iBase], i - iBase);
 
 	StringCchCopy(szOutput, cchMax, szNewString);
 }
@@ -299,48 +298,52 @@ void TrimString(std::wstring &str, const std::wstring &strWhitespace)
 	TrimStringRight(str, strWhitespace);
 }
 
-std::optional<std::string> wstrToStr(const std::wstring &source)
+std::optional<std::string> WstrToStr(const std::wstring &source)
 {
-	int res = WideCharToMultiByte(CP_ACP, 0, source.c_str(), -1, nullptr, 0, nullptr, nullptr);
+	int length = WideCharToMultiByte(CP_ACP, 0, source.c_str(), -1, nullptr, 0, nullptr, nullptr);
 
-	if (res == 0)
+	if (length == 0)
 	{
 		return std::nullopt;
 	}
 
 	std::string narrowString;
-	narrowString.resize(res);
+	narrowString.resize(length);
 
-	res = WideCharToMultiByte(CP_ACP, 0, source.c_str(), -1, narrowString.data(),
+	length = WideCharToMultiByte(CP_ACP, 0, source.c_str(), -1, narrowString.data(),
 		static_cast<int>(narrowString.size()), nullptr, nullptr);
 
-	if (res == 0)
+	if (length == 0)
 	{
 		return std::nullopt;
 	}
 
+	narrowString.resize(length - 1);
+
 	return narrowString;
 }
 
-std::optional<std::wstring> strToWstr(const std::string &source)
+std::optional<std::wstring> StrToWstr(const std::string &source)
 {
-	int res = MultiByteToWideChar(CP_ACP, 0, source.c_str(), -1, nullptr, 0);
+	int length = MultiByteToWideChar(CP_ACP, 0, source.c_str(), -1, nullptr, 0);
 
-	if (res == 0)
+	if (length == 0)
 	{
 		return std::nullopt;
 	}
 
 	std::wstring wideString;
-	wideString.resize(res);
+	wideString.resize(length);
 
-	res = MultiByteToWideChar(CP_ACP, 0, source.c_str(), -1, wideString.data(),
+	length = MultiByteToWideChar(CP_ACP, 0, source.c_str(), -1, wideString.data(),
 		static_cast<int>(wideString.size()));
 
-	if (res == 0)
+	if (length == 0)
 	{
 		return std::nullopt;
 	}
+
+	wideString.resize(length - 1);
 
 	return wideString;
 }

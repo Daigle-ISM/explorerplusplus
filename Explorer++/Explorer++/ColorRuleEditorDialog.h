@@ -12,7 +12,7 @@
 
 class ColorRuleEditorDialog;
 class ColorRuleModel;
-class WindowSubclassWrapper;
+class WindowSubclass;
 
 class ColorRuleEditorDialogPersistentSettings : public DialogSettings
 {
@@ -47,9 +47,11 @@ public:
 	class EditDetails
 	{
 	private:
-		struct Private
+		struct Token
 		{
-			Private() = default;
+		private:
+			Token() = default;
+			friend EditDetails;
 		};
 
 	public:
@@ -59,14 +61,14 @@ public:
 			NewItem
 		};
 
-		EditDetails(Type type, Private) : type(type)
+		EditDetails(Type type, Token) : type(type)
 		{
 		}
 
 		static std::unique_ptr<EditDetails> AddNewColorRule(std::unique_ptr<ColorRule> colorRule,
 			std::optional<size_t> index = std::nullopt)
 		{
-			auto editDetails = std::make_unique<EditDetails>(Type::NewItem, Private());
+			auto editDetails = std::make_unique<EditDetails>(Type::NewItem, Token());
 			editDetails->newColorRule = std::move(colorRule);
 			editDetails->index = index;
 			return editDetails;
@@ -74,7 +76,7 @@ public:
 
 		static std::unique_ptr<EditDetails> EditColorRule(ColorRule *colorRule)
 		{
-			auto editDetails = std::make_unique<EditDetails>(Type::ExistingItem, Private());
+			auto editDetails = std::make_unique<EditDetails>(Type::ExistingItem, Token());
 			editDetails->existingColorRule = colorRule;
 			return editDetails;
 		}
@@ -87,8 +89,8 @@ public:
 		ColorRule *existingColorRule = nullptr;
 	};
 
-	ColorRuleEditorDialog(HINSTANCE resourceInstance, HWND parent, ColorRuleModel *model,
-		std::unique_ptr<EditDetails> editDetails);
+	ColorRuleEditorDialog(HINSTANCE resourceInstance, HWND parent, ThemeManager *themeManager,
+		ColorRuleModel *model, std::unique_ptr<EditDetails> editDetails);
 
 protected:
 	INT_PTR OnInitDialog() override;
@@ -98,7 +100,7 @@ protected:
 	void SaveState() override;
 
 private:
-	LRESULT CALLBACK StaticColorControlProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+	LRESULT StaticColorControlProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 	void OnChangeColor();
 
@@ -115,5 +117,5 @@ private:
 
 	ColorRuleEditorDialogPersistentSettings *m_persistentSettings;
 
-	std::vector<std::unique_ptr<WindowSubclassWrapper>> m_windowSubclasses;
+	std::vector<std::unique_ptr<WindowSubclass>> m_windowSubclasses;
 };

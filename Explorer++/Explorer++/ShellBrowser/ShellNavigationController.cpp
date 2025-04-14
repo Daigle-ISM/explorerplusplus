@@ -4,35 +4,44 @@
 
 #include "stdafx.h"
 #include "ShellNavigationController.h"
-#include "ShellNavigator.h"
+#include "NavigationEvents.h"
+#include "NavigationManager.h"
+#include "NavigationRequest.h"
+#include "PreservedHistoryEntry.h"
 #include "TabNavigationInterface.h"
-#include "../Helper/IconFetcher.h"
+#include "TestHelper.h"
+#include "../Helper/ShellHelper.h"
 
-ShellNavigationController::ShellNavigationController(ShellNavigator *navigator,
-	TabNavigationInterface *tabNavigation, IconFetcherInterface *iconFetcher) :
-	m_navigator(navigator),
-	m_tabNavigation(tabNavigation),
-	m_iconFetcher(iconFetcher)
+ShellNavigationController::ShellNavigationController(const ShellBrowser *shellBrowser,
+	NavigationManager *navigationManager, NavigationEvents *navigationEvents,
+	TabNavigationInterface *tabNavigation, const PidlAbsolute &initialPidl) :
+	m_navigationManager(navigationManager),
+	m_tabNavigation(tabNavigation)
 {
-	Initialize();
+	Initialize(shellBrowser, navigationEvents);
+
+	AddEntry(
+		std::make_unique<HistoryEntry>(initialPidl, HistoryEntry::InitialNavigationType::Initial));
 }
 
-ShellNavigationController::ShellNavigationController(ShellNavigator *navigator,
-	TabNavigationInterface *tabNavigation, IconFetcherInterface *iconFetcher,
+ShellNavigationController::ShellNavigationController(const ShellBrowser *shellBrowser,
+	NavigationManager *navigationManager, NavigationEvents *navigationEvents,
+	TabNavigationInterface *tabNavigation,
 	const std::vector<std::unique_ptr<PreservedHistoryEntry>> &preservedEntries, int currentEntry) :
 	NavigationController(CopyPreservedHistoryEntries(preservedEntries), currentEntry),
-	m_navigator(navigator),
-	m_tabNavigation(tabNavigation),
-	m_iconFetcher(iconFetcher)
+	m_navigationManager(navigationManager),
+	m_tabNavigation(tabNavigation)
 {
-	Initialize();
+	Initialize(shellBrowser, navigationEvents);
 }
 
-void ShellNavigationController::Initialize()
+void ShellNavigationController::Initialize(const ShellBrowser *shellBrowser,
+	NavigationEvents *navigationEvents)
 {
-	m_connections.emplace_back(m_navigator->AddNavigationCommittedObserver(
+	m_connections.push_back(navigationEvents->AddCommittedObserver(
 		std::bind_front(&ShellNavigationController::OnNavigationCommitted, this),
-		boost::signals2::at_front));
+		NavigationEventScope::ForShellBrowser(*shellBrowser), boost::signals2::at_front,
+		NavigationEvents::SlotGroup::HighestPriority));
 }
 
 std::vector<std::unique_ptr<HistoryEntry>> ShellNavigationController::CopyPreservedHistoryEntries(
@@ -42,181 +51,161 @@ std::vector<std::unique_ptr<HistoryEntry>> ShellNavigationController::CopyPreser
 
 	for (const auto &preservedEntry : preservedEntries)
 	{
-		auto entry = std::make_unique<HistoryEntry>(*preservedEntry);
+		auto entry = std::make_unique<HistoryEntry>(preservedEntry->GetPidl());
 		entries.push_back(std::move(entry));
 	}
 
 	return entries;
 }
 
-void ShellNavigationController::OnNavigationCommitted(const NavigateParams &navigateParams)
+void ShellNavigationController::OnNavigationCommitted(const NavigationRequest *request)
 {
-	if (navigateParams.addHistoryEntry)
+	auto historyEntryType = request->GetNavigateParams().historyEntryType;
+
+	auto *currentEntry = GetCurrentEntry();
+
+	// If the current entry is the initial entry, it should be replaced, regardless of the requested
+	// history entry type.
+	if (currentEntry->IsInitialEntry())
 	{
-		std::wstring displayName;
-		HRESULT hr = GetDisplayName(navigateParams.pidl.Raw(), SHGDN_INFOLDER, displayName);
+		// If the current entry is the initial entry, that should be the only entry.
+		DCHECK_EQ(GetNumHistoryEntries(), 1);
 
-		if (FAILED(hr))
-		{
-			// It's not expected that this would happen, so it would be useful to have some
-			// indication if the call above ever does fail.
-			assert(false);
-
-			displayName = L"(Unknown)";
-		}
-
-		auto fullPathForDisplay = GetFolderPathForDisplay(navigateParams.pidl.Raw());
-
-		if (!fullPathForDisplay)
-		{
-			assert(false);
-
-			fullPathForDisplay = L"(Unknown)";
-		}
-
-		auto newEntry = std::make_unique<HistoryEntry>(navigateParams.pidl.Raw(), displayName,
-			*fullPathForDisplay);
-		int entryId = newEntry->GetId();
-		int index = AddEntry(std::move(newEntry));
-
-		// TODO: It would probably be better to do this somewhere else, since
-		// this class is focused on navigation.
-		m_iconFetcher->QueueIconTask(navigateParams.pidl.Raw(),
-			[this, index, entryId](int iconIndex)
-			{
-				auto *entry = GetEntryAtIndex(index);
-
-				if (!entry || entry->GetId() != entryId)
-				{
-					return;
-				}
-
-				entry->SetSystemIconIndex(iconIndex);
-			});
+		historyEntryType = HistoryEntryType::ReplaceCurrentEntry;
 	}
 
-	if (navigateParams.historyEntryId)
+	// If navigating to a history entry, the current index will be set here. It's important this is
+	// done before attempting to replace the current entry.
+	if (request->GetNavigateParams().historyEntryId)
 	{
-		auto *entry = GetEntryById(*navigateParams.historyEntryId);
+		auto *entry = GetEntryById(*request->GetNavigateParams().historyEntryId);
 
 		if (entry)
 		{
 			auto index = GetIndexOfEntry(entry);
 			SetCurrentIndex(*index);
+
+			// The current entry has changed, so retrieve it again here.
+			currentEntry = GetCurrentEntry();
+		}
+		else if (historyEntryType == HistoryEntryType::ReplaceCurrentEntry
+			&& !currentEntry->IsInitialEntry())
+		{
+			// The history entry can't be replaced if it doesn't exist, so add a new entry instead.
+			historyEntryType = HistoryEntryType::AddEntry;
 		}
 	}
-}
 
-HRESULT ShellNavigationController::GoToOffset(int offset)
-{
-	auto entry = GetEntry(offset);
-
-	if (!entry)
+	if (historyEntryType == HistoryEntryType::AddEntry
+		|| historyEntryType == HistoryEntryType::ReplaceCurrentEntry)
 	{
-		return E_FAIL;
-	}
+		auto entry = std::make_unique<HistoryEntry>(request->GetNavigateParams().pidl);
 
-	return Navigate(entry);
+		if (historyEntryType == HistoryEntryType::AddEntry)
+		{
+			AddEntry(std::move(entry));
+		}
+		else
+		{
+			// When an entry is replaced, the set of selected items should be retained.
+			entry->SetSelectedItems(currentEntry->GetSelectedItems());
+
+			ReplaceCurrentEntry(std::move(entry));
+		}
+	}
 }
 
 bool ShellNavigationController::CanGoUp() const
 {
 	auto *currentEntry = GetCurrentEntry();
-
-	if (!currentEntry)
-	{
-		return false;
-	}
-
-	return !IsNamespaceRoot(currentEntry->GetPidl().get());
+	return !IsNamespaceRoot(currentEntry->GetPidl().Raw());
 }
 
-HRESULT ShellNavigationController::GoUp()
+void ShellNavigationController::GoUp()
 {
 	auto *currentEntry = GetCurrentEntry();
 
-	if (!currentEntry)
-	{
-		return E_FAIL;
-	}
-
 	unique_pidl_absolute pidlParent;
-	HRESULT hr = GetVirtualParentPath(currentEntry->GetPidl().get(), wil::out_param(pidlParent));
+	HRESULT hr = GetVirtualParentPath(currentEntry->GetPidl().Raw(), wil::out_param(pidlParent));
 
 	if (FAILED(hr))
 	{
-		return hr;
+		return;
 	}
 
-	auto navigateParams = NavigateParams::Up(pidlParent.get(), currentEntry->GetPidl().get());
+	auto navigateParams = NavigateParams::Up(pidlParent.get(), currentEntry->GetPidl().Raw());
+	Navigate(navigateParams);
+}
 
-	if (m_navigationMode == NavigationMode::ForceNewTab && GetCurrentEntry())
+void ShellNavigationController::Refresh()
+{
+	auto *currentEntry = GetCurrentEntry();
+	auto navigateParams = NavigateParams::History(currentEntry);
+	Navigate(navigateParams);
+}
+
+void ShellNavigationController::Navigate(const HistoryEntry *entry)
+{
+	auto navigateParams = NavigateParams::History(entry);
+	Navigate(navigateParams);
+}
+
+void ShellNavigationController::Navigate(const std::wstring &path)
+{
+	unique_pidl_absolute pidlDirectory;
+	HRESULT hr = ParseDisplayNameForNavigation(path.c_str(), pidlDirectory);
+
+	if (FAILED(hr))
 	{
-		m_tabNavigation->CreateNewTab(navigateParams, true);
-		return S_OK;
+		return;
+	}
+
+	auto navigateParams = NavigateParams::Normal(pidlDirectory.get());
+	Navigate(navigateParams);
+}
+
+void ShellNavigationController::Navigate(NavigateParams &navigateParams)
+{
+	auto *currentEntry = GetCurrentEntry();
+	HistoryEntry *targetEntry = nullptr;
+
+	if (navigateParams.navigationType == NavigationType::History)
+	{
+		targetEntry = GetEntryById(*navigateParams.historyEntryId);
 	}
 	else
 	{
-		return m_navigator->Navigate(navigateParams);
+		targetEntry = currentEntry;
 	}
-}
 
-HRESULT ShellNavigationController::Refresh()
-{
-	auto *currentEntry = GetCurrentEntry();
-
-	if (!currentEntry)
+	// Navigations to the current directory should be treated as an implicit refresh and proceed in
+	// the current tab, regardless of whether or not the tab is locked. The only exception is a
+	// navigation to a history entry, except the current history entry (navigating to the current
+	// history entry is an explicit refresh).
+	if (targetEntry == currentEntry && currentEntry->GetPidl() == navigateParams.pidl)
 	{
-		return E_FAIL;
+		navigateParams.historyEntryType = HistoryEntryType::ReplaceCurrentEntry;
+		navigateParams.overrideNavigationTargetMode = true;
 	}
 
-	auto navigateParams = NavigateParams::History(currentEntry);
-	return m_navigator->Navigate(navigateParams);
-}
-
-HRESULT ShellNavigationController::Navigate(const HistoryEntry *entry)
-{
-	auto navigateParams = NavigateParams::History(entry);
-	return Navigate(navigateParams);
-}
-
-HRESULT ShellNavigationController::Navigate(const std::wstring &path, bool addHistoryEntry)
-{
-	unique_pidl_absolute pidlDirectory;
-	RETURN_IF_FAILED(
-		SHParseDisplayName(path.c_str(), nullptr, wil::out_param(pidlDirectory), 0, nullptr));
-
-	auto navigateParams = NavigateParams::Normal(pidlDirectory.get(), addHistoryEntry);
-	return Navigate(navigateParams);
-}
-
-HRESULT ShellNavigationController::Navigate(NavigateParams &navigateParams)
-{
-	auto currentEntry = GetCurrentEntry();
-
-	if (m_navigationMode == NavigationMode::ForceNewTab && currentEntry)
+	if (m_navigationTargetMode == NavigationTargetMode::ForceNewTab
+		&& !currentEntry->IsInitialEntry() && !navigateParams.overrideNavigationTargetMode)
 	{
 		m_tabNavigation->CreateNewTab(navigateParams, true);
-		return S_OK;
+		return;
 	}
 
-	if (currentEntry
-		&& ArePidlsEquivalent(currentEntry->GetPidl().get(), navigateParams.pidl.Raw()))
-	{
-		navigateParams.addHistoryEntry = false;
-	}
-
-	return m_navigator->Navigate(navigateParams);
+	m_navigationManager->StartNavigation(navigateParams);
 }
 
-HRESULT ShellNavigationController::GetFailureValue()
+void ShellNavigationController::SetNavigationTargetMode(NavigationTargetMode navigationTargetMode)
 {
-	return E_FAIL;
+	m_navigationTargetMode = navigationTargetMode;
 }
 
-void ShellNavigationController::SetNavigationMode(NavigationMode navigationMode)
+NavigationTargetMode ShellNavigationController::GetNavigationTargetMode() const
 {
-	m_navigationMode = navigationMode;
+	return m_navigationTargetMode;
 }
 
 HistoryEntry *ShellNavigationController::GetEntryById(int id)

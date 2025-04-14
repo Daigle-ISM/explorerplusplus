@@ -11,11 +11,12 @@
 #include "CoreInterface.h"
 #include "MainResource.h"
 #include "ResourceHelper.h"
-#include "ShellBrowser/ShellBrowser.h"
+#include "ShellBrowser/ShellBrowserImpl.h"
 #include "ShellBrowser/ShellNavigationController.h"
-#include "TabContainer.h"
+#include "TabContainerImpl.h"
 #include "../Helper/ShellHelper.h"
 #include <boost/range/adaptor/filtered.hpp>
+#include <glog/logging.h>
 #include <algorithm>
 
 int CALLBACK SortByDefault(const BookmarkItem *firstItem, const BookmarkItem *secondItem);
@@ -77,7 +78,7 @@ int CALLBACK BookmarkHelper::Sort(ColumnType columnType, const BookmarkItem *fir
 			break;
 
 		default:
-			assert(false);
+			DCHECK(false);
 			break;
 		}
 
@@ -124,12 +125,14 @@ int CALLBACK SortByDateModified(const BookmarkItem *firstItem, const BookmarkIte
 }
 
 void BookmarkHelper::BookmarkAllTabs(BookmarkTree *bookmarkTree, HINSTANCE resourceInstance,
-	HWND parentWindow, CoreInterface *coreInterface)
+	HWND parentWindow, ThemeManager *themeManager, CoreInterface *coreInterface,
+	const IconResourceLoader *iconResourceLoader)
 {
 	std::wstring bookmarkAllTabsText =
 		ResourceHelper::LoadString(resourceInstance, IDS_ADD_BOOKMARK_TITLE_BOOKMARK_ALL_TABS);
-	auto bookmarkFolder = AddBookmarkItem(bookmarkTree, BookmarkItem::Type::Folder, nullptr,
-		std::nullopt, parentWindow, coreInterface, bookmarkAllTabsText);
+	auto bookmarkFolder =
+		AddBookmarkItem(bookmarkTree, BookmarkItem::Type::Folder, nullptr, std::nullopt,
+			parentWindow, themeManager, coreInterface, iconResourceLoader, bookmarkAllTabsText);
 
 	if (!bookmarkFolder)
 	{
@@ -138,12 +141,13 @@ void BookmarkHelper::BookmarkAllTabs(BookmarkTree *bookmarkTree, HINSTANCE resou
 
 	size_t index = 0;
 
-	for (auto tabRef : coreInterface->GetTabContainer()->GetAllTabsInOrder())
+	for (auto tabRef : coreInterface->GetTabContainerImpl()->GetAllTabsInOrder())
 	{
 		auto &tab = tabRef.get();
-		auto entry = tab.GetShellBrowser()->GetNavigationController()->GetCurrentEntry();
-		auto bookmark = std::make_unique<BookmarkItem>(std::nullopt, entry->GetDisplayName(),
-			tab.GetShellBrowser()->GetDirectory());
+		auto *entry = tab.GetShellBrowserImpl()->GetNavigationController()->GetCurrentEntry();
+		auto bookmark = std::make_unique<BookmarkItem>(std::nullopt,
+			GetDisplayNameWithFallback(entry->GetPidl().Raw(), SHGDN_INFOLDER),
+			GetDisplayNameWithFallback(entry->GetPidl().Raw(), SHGDN_FORPARSING));
 
 		bookmarkTree->AddBookmarkItem(bookmarkFolder, std::move(bookmark), index);
 
@@ -153,17 +157,20 @@ void BookmarkHelper::BookmarkAllTabs(BookmarkTree *bookmarkTree, HINSTANCE resou
 
 BookmarkItem *BookmarkHelper::AddBookmarkItem(BookmarkTree *bookmarkTree, BookmarkItem::Type type,
 	BookmarkItem *defaultParentSelection, std::optional<size_t> suggestedIndex, HWND parentWindow,
-	CoreInterface *coreInterface, std::optional<std::wstring> customDialogTitle)
+	ThemeManager *themeManager, CoreInterface *coreInterface,
+	const IconResourceLoader *iconResourceLoader, std::optional<std::wstring> customDialogTitle)
 {
 	std::unique_ptr<BookmarkItem> bookmarkItem;
 
 	if (type == BookmarkItem::Type::Bookmark)
 	{
-		const Tab &selectedTab = coreInterface->GetTabContainer()->GetSelectedTab();
-		auto entry = selectedTab.GetShellBrowser()->GetNavigationController()->GetCurrentEntry();
+		const Tab &selectedTab = coreInterface->GetTabContainerImpl()->GetSelectedTab();
+		auto *entry =
+			selectedTab.GetShellBrowserImpl()->GetNavigationController()->GetCurrentEntry();
 
-		bookmarkItem = std::make_unique<BookmarkItem>(std::nullopt, entry->GetDisplayName(),
-			selectedTab.GetShellBrowser()->GetDirectory());
+		bookmarkItem = std::make_unique<BookmarkItem>(std::nullopt,
+			GetDisplayNameWithFallback(entry->GetPidl().Raw(), SHGDN_INFOLDER),
+			GetDisplayNameWithFallback(entry->GetPidl().Raw(), SHGDN_FORPARSING));
 	}
 	else
 	{
@@ -177,13 +184,13 @@ BookmarkItem *BookmarkHelper::AddBookmarkItem(BookmarkTree *bookmarkTree, Bookma
 	BookmarkItem *selectedParentFolder = nullptr;
 
 	AddBookmarkDialog addBookmarkDialog(coreInterface->GetResourceInstance(), parentWindow,
-		coreInterface, bookmarkTree, bookmarkItem.get(), defaultParentSelection,
-		&selectedParentFolder, customDialogTitle);
+		themeManager, bookmarkTree, bookmarkItem.get(), defaultParentSelection,
+		&selectedParentFolder, iconResourceLoader, customDialogTitle);
 	auto res = addBookmarkDialog.ShowModalDialog();
 
 	if (res == BaseDialog::RETURN_OK)
 	{
-		assert(selectedParentFolder != nullptr);
+		DCHECK_NOTNULL(selectedParentFolder);
 
 		size_t targetIndex;
 
@@ -205,16 +212,23 @@ BookmarkItem *BookmarkHelper::AddBookmarkItem(BookmarkTree *bookmarkTree, Bookma
 }
 
 void BookmarkHelper::EditBookmarkItem(BookmarkItem *bookmarkItem, BookmarkTree *bookmarkTree,
-	HINSTANCE resourceInstance, HWND parentWindow, CoreInterface *coreInterface)
+	HINSTANCE resourceInstance, HWND parentWindow, ThemeManager *themeManager,
+	const IconResourceLoader *iconResourceLoader)
 {
+	if (bookmarkTree->IsPermanentNode(bookmarkItem))
+	{
+		DCHECK(false);
+		return;
+	}
+
 	BookmarkItem *selectedParentFolder = nullptr;
-	AddBookmarkDialog addBookmarkDialog(resourceInstance, parentWindow, coreInterface, bookmarkTree,
-		bookmarkItem, nullptr, &selectedParentFolder);
+	AddBookmarkDialog addBookmarkDialog(resourceInstance, parentWindow, themeManager, bookmarkTree,
+		bookmarkItem, nullptr, &selectedParentFolder, iconResourceLoader);
 	auto res = addBookmarkDialog.ShowModalDialog();
 
 	if (res == BaseDialog::RETURN_OK)
 	{
-		assert(selectedParentFolder != nullptr);
+		DCHECK_NOTNULL(selectedParentFolder);
 
 		size_t newIndex;
 
@@ -242,7 +256,7 @@ void BookmarkHelper::OpenBookmarkItemWithDisposition(const BookmarkItem *bookmar
 	// It doesn't make any sense to open a folder in the current tab.
 	if (bookmarkItem->IsFolder() && disposition == OpenFolderDisposition::CurrentTab)
 	{
-		assert(false);
+		DCHECK(false);
 		return;
 	}
 
@@ -252,8 +266,8 @@ void BookmarkHelper::OpenBookmarkItemWithDisposition(const BookmarkItem *bookmar
 		return;
 	}
 
-	Tab &selectedTab = coreInterface->GetTabContainer()->GetSelectedTab();
-	std::wstring currentDirectory = selectedTab.GetShellBrowser()->GetDirectory();
+	Tab &selectedTab = coreInterface->GetTabContainerImpl()->GetSelectedTab();
+	std::wstring currentDirectory = selectedTab.GetShellBrowserImpl()->GetDirectory();
 
 	if (bookmarkItem->IsFolder())
 	{
@@ -278,7 +292,7 @@ void BookmarkHelper::OpenBookmarkItemWithDisposition(const BookmarkItem *bookmar
 void OpenBookmarkWithDisposition(const BookmarkItem *bookmarkItem,
 	OpenFolderDisposition disposition, const std::wstring &currentDirectory, Navigator *navigator)
 {
-	assert(bookmarkItem->IsBookmark());
+	DCHECK(bookmarkItem->IsBookmark());
 
 	auto absolutePath = TransformUserEnteredPathToAbsolutePathAndNormalize(
 		bookmarkItem->GetLocation(), currentDirectory, EnvVarsExpansion::Expand);
@@ -325,7 +339,7 @@ bool BookmarkHelper::CopyBookmarkItems(BookmarkTree *bookmarkTree,
 void BookmarkHelper::PasteBookmarkItems(BookmarkTree *bookmarkTree, BookmarkItem *parentFolder,
 	size_t index)
 {
-	assert(parentFolder->IsFolder());
+	DCHECK(parentFolder->IsFolder());
 
 	BookmarkClipboard bookmarkClipboard;
 	auto bookmarkItems = bookmarkClipboard.ReadBookmarks();

@@ -9,7 +9,7 @@
 #include "Bookmarks/UI/BookmarkDropTargetWindow.h"
 #include "ResourceHelper.h"
 #include "SignalWrapper.h"
-#include "../Helper/WindowSubclassWrapper.h"
+#include "../Helper/WindowSubclass.h"
 #include <boost/signals2.hpp>
 #include <wil/resource.h>
 #include <optional>
@@ -17,13 +17,14 @@
 #include <unordered_set>
 
 class BookmarkTree;
-class CoreInterface;
+class IconResourceLoader;
 
 class BookmarkTreeView : private BookmarkDropTargetWindow
 {
 public:
-	BookmarkTreeView(HWND hTreeView, HINSTANCE resourceInstance, CoreInterface *coreInterface,
-		BookmarkTree *bookmarkTree, const std::unordered_set<std::wstring> &setExpansion,
+	BookmarkTreeView(HWND hTreeView, HINSTANCE resourceInstance,
+		const IconResourceLoader *iconResourceLoader, BookmarkTree *bookmarkTree,
+		const std::unordered_set<std::wstring> &setExpansion,
 		std::optional<std::wstring> guidSelected = std::nullopt);
 
 	BookmarkItem *GetBookmarkFolderFromTreeView(HTREEITEM hItem);
@@ -96,6 +97,6 @@ private:
 
 	std::optional<HTREEITEM> m_previousDropItem;
 
-	std::vector<std::unique_ptr<WindowSubclassWrapper>> m_windowSubclasses;
+	std::vector<std::unique_ptr<WindowSubclass>> m_windowSubclasses;
 	std::vector<boost::signals2::scoped_connection> m_connections;
 };

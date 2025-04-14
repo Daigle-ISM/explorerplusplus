@@ -4,11 +4,13 @@
 
 #include "stdafx.h"
 #include "IconResourceLoader.h"
-#include "DarkModeHelper.h"
+#include "DarkModeManager.h"
 #include "IconMappings.h"
 #include "../Helper/ImageHelper.h"
 
-IconResourceLoader::IconResourceLoader(IconSet iconSet) : m_iconSet(iconSet)
+IconResourceLoader::IconResourceLoader(IconSet iconSet, const DarkModeManager *darkModeManager) :
+	m_iconSet(iconSet),
+	m_darkModeManager(darkModeManager)
 {
 }
 
@@ -16,67 +18,28 @@ wil::unique_hbitmap IconResourceLoader::LoadBitmapFromPNGForDpi(Icon icon, int i
 	int iconHeight, int dpi) const
 {
 	auto gdiplusBitmap = LoadGdiplusBitmapFromPNGForDpi(icon, iconWidth, iconHeight, dpi);
-	return RetrieveBitmapFromGdiplusBitmap(gdiplusBitmap.get());
+	return ImageHelper::GdiplusBitmapToBitmap(gdiplusBitmap.get());
 }
 
 wil::unique_hbitmap IconResourceLoader::LoadBitmapFromPNGAndScale(Icon icon, int iconWidth,
 	int iconHeight) const
 {
 	auto gdiplusBitmap = LoadGdiplusBitmapFromPNGAndScalePlusInvert(icon, iconWidth, iconHeight);
-	return RetrieveBitmapFromGdiplusBitmap(gdiplusBitmap.get());
-}
-
-wil::unique_hbitmap IconResourceLoader::RetrieveBitmapFromGdiplusBitmap(
-	Gdiplus::Bitmap *gdiplusBitmap) const
-{
-	if (!gdiplusBitmap)
-	{
-		return nullptr;
-	}
-
-	wil::unique_hbitmap bitmap;
-	Gdiplus::Color color(0, 0, 0);
-	Gdiplus::Status status = gdiplusBitmap->GetHBITMAP(color, &bitmap);
-
-	if (status != Gdiplus::Status::Ok)
-	{
-		return nullptr;
-	}
-
-	return bitmap;
+	return ImageHelper::GdiplusBitmapToBitmap(gdiplusBitmap.get());
 }
 
 wil::unique_hicon IconResourceLoader::LoadIconFromPNGForDpi(Icon icon, int iconWidth,
 	int iconHeight, int dpi) const
 {
 	auto gdiplusBitmap = LoadGdiplusBitmapFromPNGForDpi(icon, iconWidth, iconHeight, dpi);
-	return RetrieveIconFromGdiplusBitmap(gdiplusBitmap.get());
+	return ImageHelper::GdiplusBitmapToIcon(gdiplusBitmap.get());
 }
 
 wil::unique_hicon IconResourceLoader::LoadIconFromPNGAndScale(Icon icon, int iconWidth,
 	int iconHeight) const
 {
 	auto gdiplusBitmap = LoadGdiplusBitmapFromPNGAndScalePlusInvert(icon, iconWidth, iconHeight);
-	return RetrieveIconFromGdiplusBitmap(gdiplusBitmap.get());
-}
-
-wil::unique_hicon IconResourceLoader::RetrieveIconFromGdiplusBitmap(
-	Gdiplus::Bitmap *gdiplusBitmap) const
-{
-	if (!gdiplusBitmap)
-	{
-		return nullptr;
-	}
-
-	wil::unique_hicon hicon;
-	Gdiplus::Status status = gdiplusBitmap->GetHICON(&hicon);
-
-	if (status != Gdiplus::Status::Ok)
-	{
-		return nullptr;
-	}
-
-	return hicon;
+	return ImageHelper::GdiplusBitmapToIcon(gdiplusBitmap.get());
 }
 
 std::unique_ptr<Gdiplus::Bitmap> IconResourceLoader::LoadGdiplusBitmapFromPNGForDpi(Icon icon,
@@ -93,7 +56,7 @@ std::unique_ptr<Gdiplus::Bitmap> IconResourceLoader::LoadGdiplusBitmapFromPNGAnd
 {
 	auto bitmap = LoadGdiplusBitmapFromPNGAndScale(icon, iconWidth, iconHeight);
 
-	if (m_iconSet == +IconSet::Color || !DarkModeHelper::GetInstance().IsDarkModeEnabled())
+	if (m_iconSet == +IconSet::Color || !m_darkModeManager->IsDarkModeEnabled())
 	{
 		return bitmap;
 	}
@@ -153,9 +116,7 @@ std::unique_ptr<Gdiplus::Bitmap> IconResourceLoader::LoadGdiplusBitmapFromPNGAnd
 
 	auto match = std::find_if(iconSizeMappins.begin(), iconSizeMappins.end(),
 		[iconWidth, iconHeight](auto entry)
-		{
-			return iconWidth <= entry.first && iconHeight <= entry.first;
-		});
+		{ return iconWidth <= entry.first && iconHeight <= entry.first; });
 
 	if (match == iconSizeMappins.end())
 	{

@@ -5,23 +5,27 @@
 #include "stdafx.h"
 #include "Bookmarks/UI/BookmarkContextMenuController.h"
 #include "Bookmarks/BookmarkTree.h"
+#include "BrowserWindow.h"
 #include "Config.h"
 #include "CoreInterface.h"
 #include "MainResource.h"
-#include "ShellBrowser/ShellBrowser.h"
+#include "ShellBrowser/ShellBrowserImpl.h"
 #include "ShellBrowser/ShellNavigationController.h"
-#include "TabContainer.h"
+#include "TabContainerImpl.h"
 
 BookmarkContextMenuController::BookmarkContextMenuController(BookmarkTree *bookmarkTree,
-	HINSTANCE resourceInstance, CoreInterface *coreInterface, Navigator *navigator) :
+	HINSTANCE resourceInstance, BrowserWindow *browserWindow, CoreInterface *coreInterface,
+	const IconResourceLoader *iconResourceLoader, ThemeManager *themeManager) :
 	m_bookmarkTree(bookmarkTree),
 	m_resourceInstance(resourceInstance),
+	m_browserWindow(browserWindow),
 	m_coreInterface(coreInterface),
-	m_navigator(navigator)
+	m_iconResourceLoader(iconResourceLoader),
+	m_themeManager(themeManager)
 {
 }
 
-void BookmarkContextMenuController::OnMenuItemSelected(int menuItemId,
+void BookmarkContextMenuController::OnMenuItemSelected(UINT menuItemId,
 	BookmarkItem *targetParentFolder, size_t targetIndex, const RawBookmarkItems &bookmarkItems,
 	HWND parentWindow)
 {
@@ -29,20 +33,20 @@ void BookmarkContextMenuController::OnMenuItemSelected(int menuItemId,
 	{
 	case IDM_BOOKMARKS_OPEN:
 	{
-		assert(bookmarkItems.size() == 1 && bookmarkItems[0]->IsBookmark());
+		DCHECK(bookmarkItems.size() == 1 && bookmarkItems[0]->IsBookmark());
 
 		BookmarkHelper::OpenBookmarkItemWithDisposition(bookmarkItems[0],
-			OpenFolderDisposition::CurrentTab, m_coreInterface, m_navigator);
+			OpenFolderDisposition::CurrentTab, m_coreInterface, m_browserWindow);
 	}
 	break;
 
 	case IDM_BOOKMARKS_OPEN_IN_NEW_TAB:
-		assert(bookmarkItems.size() == 1 && bookmarkItems[0]->IsBookmark());
+		DCHECK(bookmarkItems.size() == 1 && bookmarkItems[0]->IsBookmark());
 		BookmarkHelper::OpenBookmarkItemWithDisposition(bookmarkItems[0],
 			m_coreInterface->GetConfig()->openTabsInForeground
 				? OpenFolderDisposition::ForegroundTab
 				: OpenFolderDisposition::BackgroundTab,
-			m_coreInterface, m_navigator);
+			m_coreInterface, m_browserWindow);
 		break;
 
 	case IDM_BOOKMARKS_OPEN_ALL:
@@ -76,12 +80,12 @@ void BookmarkContextMenuController::OnMenuItemSelected(int menuItemId,
 		break;
 
 	case IDM_BOOKMARKS_PROPERTIES:
-		assert(bookmarkItems.size() == 1);
+		DCHECK_EQ(bookmarkItems.size(), 1U);
 		OnEditBookmarkItem(bookmarkItems[0], parentWindow);
 		break;
 
 	default:
-		assert(false);
+		DCHECK(false);
 		break;
 	}
 }
@@ -95,7 +99,7 @@ void BookmarkContextMenuController::OnOpenAll(const RawBookmarkItems &bookmarkIt
 	for (auto *bookmarkItem : bookmarkItems)
 	{
 		BookmarkHelper::OpenBookmarkItemWithDisposition(bookmarkItem, disposition, m_coreInterface,
-			m_navigator);
+			m_browserWindow);
 
 		disposition = OpenFolderDisposition::BackgroundTab;
 	}
@@ -105,7 +109,7 @@ void BookmarkContextMenuController::OnNewBookmarkItem(BookmarkItem::Type type,
 	BookmarkItem *targetParentFolder, size_t targetIndex, HWND parentWindow)
 {
 	BookmarkHelper::AddBookmarkItem(m_bookmarkTree, type, targetParentFolder, targetIndex,
-		parentWindow, m_coreInterface);
+		parentWindow, m_themeManager, m_coreInterface, m_iconResourceLoader);
 }
 
 void BookmarkContextMenuController::OnCopy(const RawBookmarkItems &bookmarkItems, bool cut)
@@ -130,5 +134,5 @@ void BookmarkContextMenuController::OnEditBookmarkItem(BookmarkItem *bookmarkIte
 	HWND parentWindow)
 {
 	BookmarkHelper::EditBookmarkItem(bookmarkItem, m_bookmarkTree, m_resourceInstance, parentWindow,
-		m_coreInterface);
+		m_themeManager, m_iconResourceLoader);
 }

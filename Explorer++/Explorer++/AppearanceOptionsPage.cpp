@@ -5,19 +5,21 @@
 #include "stdafx.h"
 #include "AppearanceOptionsPage.h"
 #include "Config.h"
-#include "DarkModeHelper.h"
+#include "DarkModeManager.h"
 #include "MainResource.h"
-#include "ResourceHelper.h"
+#include "ResourceLoader.h"
 #include "../Helper/Controls.h"
 #include "../Helper/ResizableDialogHelper.h"
-
-std::wstring GetIconSetText(IconSet iconSet, HINSTANCE resourceInstance);
+#include <glog/logging.h>
 
 AppearanceOptionsPage::AppearanceOptionsPage(HWND parent, HINSTANCE resourceInstance,
 	Config *config, CoreInterface *coreInterface, SettingChangedCallback settingChangedCallback,
-	HWND tooltipWindow) :
+	HWND tooltipWindow, const DarkModeManager *darkModeManager,
+	const ResourceLoader *resourceLoader) :
 	OptionsPage(IDD_OPTIONS_APPEARANCE, IDS_OPTIONS_APPEARANCE_TITLE, parent, resourceInstance,
-		config, coreInterface, settingChangedCallback, tooltipWindow)
+		config, coreInterface, settingChangedCallback, tooltipWindow),
+	m_darkModeManager(darkModeManager),
+	m_resourceLoader(resourceLoader)
 {
 }
 
@@ -52,9 +54,7 @@ void AppearanceOptionsPage::InitializeControls()
 	AddTooltipForControl(m_tooltipWindow, GetDlgItem(GetDialog(), IDC_OPTIONS_THEME),
 		m_resourceInstance, IDS_OPTIONS_THEME_TOOLTIP, TooltipType::Rectangle);
 
-	auto &darkModeHelper = DarkModeHelper::GetInstance();
-
-	if (!darkModeHelper.IsDarkModeSupported())
+	if (!m_darkModeManager->IsDarkModeSupported())
 	{
 		EnableWindow(GetDlgItem(GetDialog(), IDC_OPTIONS_THEME_LABEL), false);
 		EnableWindow(GetDlgItem(GetDialog(), IDC_OPTIONS_THEME), false);
@@ -64,7 +64,7 @@ void AppearanceOptionsPage::InitializeControls()
 
 	for (auto iconSet : IconSet::_values())
 	{
-		iconSetItems.emplace_back(iconSet, GetIconSetText(iconSet, m_resourceInstance));
+		iconSetItems.emplace_back(iconSet, GetIconSetText(iconSet));
 	}
 
 	AddItemsToComboBox(GetDlgItem(GetDialog(), IDC_OPTIONS_ICON_SET), iconSetItems,
@@ -74,14 +74,14 @@ void AppearanceOptionsPage::InitializeControls()
 
 	for (auto theme : Theme::_values())
 	{
-		themeItems.emplace_back(theme, GetThemeText(theme, m_resourceInstance));
+		themeItems.emplace_back(theme, GetThemeText(theme, m_resourceLoader));
 	}
 
 	AddItemsToComboBox(GetDlgItem(GetDialog(), IDC_OPTIONS_THEME), themeItems,
 		m_config->theme.get());
 }
 
-std::wstring GetIconSetText(IconSet iconSet, HINSTANCE resourceInstance)
+std::wstring AppearanceOptionsPage::GetIconSetText(IconSet iconSet)
 {
 	UINT stringId;
 
@@ -100,10 +100,19 @@ std::wstring GetIconSetText(IconSet iconSet, HINSTANCE resourceInstance)
 		break;
 
 	default:
-		throw std::runtime_error("IconSet value not found");
+		LOG(FATAL) << "Invalid IconSet value";
+
+		// Although LOG(FATAL) results in a call that's marked as noreturn, the compiler may still
+		// issue an uninitialized variable warning (in this case, it warns that stringId may be
+		// uninitialized). That's not correct here, since the LOG(FATAL) call will result in the
+		// application being terminated and stringId is always initialized otherwise. Using
+		// __assume(0) here indicates to the compiler that the code path is unreachable. That then
+		// prevents the warning from being generated.
+		// This can be removed if the compiler no longer issues a warning in this type of situation.
+		__assume(0);
 	}
 
-	return ResourceHelper::LoadString(resourceInstance, stringId);
+	return m_resourceLoader->LoadString(stringId);
 }
 
 void AppearanceOptionsPage::OnCommand(WPARAM wParam, LPARAM lParam)

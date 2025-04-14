@@ -4,9 +4,11 @@
 
 #include "stdafx.h"
 #include "GeneralOptionsPage.h"
+#include "App.h"
 #include "Config.h"
 #include "CoreInterface.h"
 #include "Explorer++_internal.h"
+#include "LanguageHelper.h"
 #include "MainResource.h"
 #include "ResourceHelper.h"
 #include "../Helper/DpiCompatibility.h"
@@ -14,7 +16,8 @@
 #include "../Helper/ProcessHelper.h"
 #include "../Helper/ResizableDialogHelper.h"
 #include "../Helper/WindowHelper.h"
-#include <boost/format.hpp>
+#include <fmt/format.h>
+#include <fmt/xchar.h>
 
 using namespace DefaultFileManager;
 
@@ -24,23 +27,18 @@ const std::unordered_map<ReplaceExplorerMode, int> REPLACE_EXPLORER_ENUM_CONTROL
 	{ ReplaceExplorerMode::All, IDC_OPTION_REPLACEEXPLORER_ALL }
 };
 
-GeneralOptionsPage::GeneralOptionsPage(HWND parent, HINSTANCE resourceInstance, Config *config,
-	CoreInterface *coreInterface, SettingChangedCallback settingChangedCallback,
+GeneralOptionsPage::GeneralOptionsPage(HWND parent, HINSTANCE resourceInstance, App *app,
+	Config *config, CoreInterface *coreInterface, SettingChangedCallback settingChangedCallback,
 	HWND tooltipWindow) :
 	OptionsPage(IDD_OPTIONS_GENERAL, IDS_OPTIONS_GENERAL_TITLE, parent, resourceInstance, config,
-		coreInterface, settingChangedCallback, tooltipWindow)
+		coreInterface, settingChangedCallback, tooltipWindow),
+	m_app(app)
 {
 }
 
 std::unique_ptr<ResizableDialogHelper> GeneralOptionsPage::InitializeResizeDialogHelper()
 {
 	std::vector<ResizableDialogControl> controls;
-	controls.emplace_back(GetDlgItem(GetDialog(), IDC_GROUP_STARTUP), MovingType::None,
-		SizingType::Horizontal);
-	controls.emplace_back(GetDlgItem(GetDialog(), IDC_STARTUP_PREVIOUSTABS), MovingType::None,
-		SizingType::Horizontal);
-	controls.emplace_back(GetDlgItem(GetDialog(), IDC_STARTUP_DEFAULTFOLDER), MovingType::None,
-		SizingType::Horizontal);
 	controls.emplace_back(GetDlgItem(GetDialog(), IDC_GROUP_DEFAULT_FILE_MANAGER), MovingType::None,
 		SizingType::Horizontal);
 	controls.emplace_back(GetDlgItem(GetDialog(), IDC_OPTION_REPLACEEXPLORER_NONE),
@@ -70,43 +68,22 @@ std::unique_ptr<ResizableDialogHelper> GeneralOptionsPage::InitializeResizeDialo
 
 void GeneralOptionsPage::InitializeControls()
 {
-	HWND hButton;
-	HWND hEdit;
-	int nIDButton;
-
-	switch (m_config->startupMode)
-	{
-	case StartupMode::PreviousTabs:
-		nIDButton = IDC_STARTUP_PREVIOUSTABS;
-		break;
-
-	case StartupMode::DefaultFolder:
-		nIDButton = IDC_STARTUP_DEFAULTFOLDER;
-		break;
-
-	default:
-		nIDButton = IDC_STARTUP_PREVIOUSTABS;
-		m_config->startupMode = StartupMode::PreviousTabs;
-		break;
-	}
-	CheckDlgButton(GetDialog(), nIDButton, BST_CHECKED);
-
 	CheckRadioButton(GetDialog(), IDC_OPTION_REPLACEEXPLORER_NONE, IDC_OPTION_REPLACEEXPLORER_ALL,
 		REPLACE_EXPLORER_ENUM_CONTROL_ID_MAPPINGS.at(m_config->replaceExplorerMode));
 
-	if (m_coreInterface->GetSavePreferencesToXmlFile())
+	if (m_app->GetSavePreferencesToXmlFile())
 	{
 		CheckDlgButton(GetDialog(), IDC_OPTION_XML, BST_CHECKED);
 	}
 
 	UINT dpi = DpiCompatibility::GetInstance().GetDpiForWindow(GetDialog());
 	m_newTabDirectoryIcon =
-		m_coreInterface->GetIconResourceLoader()->LoadIconFromPNGForDpi(Icon::Folder, 16, 16, dpi);
+		m_app->GetIconResourceLoader()->LoadIconFromPNGForDpi(Icon::Folder, 16, 16, dpi);
 
-	hButton = GetDlgItem(GetDialog(), IDC_DEFAULT_NEWTABDIR_BUTTON);
+	HWND hButton = GetDlgItem(GetDialog(), IDC_DEFAULT_NEWTABDIR_BUTTON);
 	SendMessage(hButton, BM_SETIMAGE, IMAGE_ICON, (LPARAM) m_newTabDirectoryIcon.get());
 
-	hEdit = GetDlgItem(GetDialog(), IDC_DEFAULT_NEWTABDIR_EDIT);
+	HWND hEdit = GetDlgItem(GetDialog(), IDC_DEFAULT_NEWTABDIR_EDIT);
 	SetNewTabDirectory(hEdit, m_config->defaultTabDirectory.c_str());
 
 	AddLanguages();
@@ -162,12 +139,11 @@ void GeneralOptionsPage::AddLanguages()
 	/* English will always be added to the combox, and will
 	always be the first item. */
 	SendMessage(hLanguageComboBox, CB_ADDSTRING, 0, (LPARAM) _T("English"));
-	SendMessage(hLanguageComboBox, CB_SETITEMDATA, 0, 9);
 
-	GetProcessImageName(GetCurrentProcessId(), szImageDirectory, SIZEOF_ARRAY(szImageDirectory));
+	GetProcessImageName(GetCurrentProcessId(), szImageDirectory, std::size(szImageDirectory));
 	PathRemoveFileSpec(szImageDirectory);
-	StringCchCopy(szNamePattern, SIZEOF_ARRAY(szNamePattern), szImageDirectory);
-	PathAppend(szNamePattern, NExplorerplusplus::LANGUAGE_DLL_FILENAME_PATTERN);
+	StringCchCopy(szNamePattern, std::size(szNamePattern), szImageDirectory);
+	PathAppend(szNamePattern, L"Explorer++*.dll");
 
 	hFindFile = FindFirstFile(szNamePattern, &wfd);
 
@@ -201,7 +177,7 @@ BOOL GeneralOptionsPage::AddLanguageToComboBox(HWND hComboBox, const TCHAR *szIm
 	const TCHAR *szFileName, WORD *pdwLanguage)
 {
 	TCHAR szFullFileName[MAX_PATH];
-	StringCchCopy(szFullFileName, SIZEOF_ARRAY(szFullFileName), szImageDirectory);
+	StringCchCopy(szFullFileName, std::size(szFullFileName), szImageDirectory);
 	PathAppend(szFullFileName, szFileName);
 
 	BOOL bSuccess = FALSE;
@@ -213,7 +189,7 @@ BOOL GeneralOptionsPage::AddLanguageToComboBox(HWND hComboBox, const TCHAR *szIm
 		TCHAR szLanguageName[32];
 
 		int iRet = GetLocaleInfo(wLanguage, LOCALE_SNATIVELANGNAME, szLanguageName,
-			SIZEOF_ARRAY(szLanguageName));
+			std::size(szLanguageName));
 
 		if (iRet != 0)
 		{
@@ -251,14 +227,6 @@ void GeneralOptionsPage::OnCommand(WPARAM wParam, LPARAM lParam)
 	{
 		switch (LOWORD(wParam))
 		{
-		case IDC_STARTUP_PREVIOUSTABS:
-		case IDC_STARTUP_DEFAULTFOLDER:
-			if (IsDlgButtonChecked(GetDialog(), LOWORD(wParam)) == BST_CHECKED)
-			{
-				m_settingChangedCallback();
-			}
-			break;
-
 		case IDC_OPTION_REPLACEEXPLORER_NONE:
 		case IDC_OPTION_REPLACEEXPLORER_FILESYSTEM:
 		case IDC_OPTION_REPLACEEXPLORER_ALL:
@@ -279,7 +247,7 @@ void GeneralOptionsPage::OnNewTabDirectoryButtonPressed()
 		ResourceHelper::LoadString(m_resourceInstance, IDS_DEFAULTSETTINGS_NEWTAB);
 
 	TCHAR szNewTabDir[MAX_PATH];
-	GetDlgItemText(GetDialog(), IDC_DEFAULT_NEWTABDIR_EDIT, szNewTabDir, SIZEOF_ARRAY(szNewTabDir));
+	GetDlgItemText(GetDialog(), IDC_DEFAULT_NEWTABDIR_EDIT, szNewTabDir, std::size(szNewTabDir));
 
 	std::wstring virtualParsingPath;
 	HRESULT hr = DecodeFriendlyPath(szNewTabDir, virtualParsingPath);
@@ -339,15 +307,6 @@ void GeneralOptionsPage::SaveSettings()
 {
 	ReplaceExplorerMode replaceExplorerMode = ReplaceExplorerMode::None;
 
-	if (IsDlgButtonChecked(GetDialog(), IDC_STARTUP_PREVIOUSTABS) == BST_CHECKED)
-	{
-		m_config->startupMode = StartupMode::PreviousTabs;
-	}
-	else if (IsDlgButtonChecked(GetDialog(), IDC_STARTUP_DEFAULTFOLDER) == BST_CHECKED)
-	{
-		m_config->startupMode = StartupMode::DefaultFolder;
-	}
-
 	if (IsDlgButtonChecked(GetDialog(), IDC_OPTION_REPLACEEXPLORER_NONE) == BST_CHECKED)
 	{
 		replaceExplorerMode = ReplaceExplorerMode::None;
@@ -366,9 +325,9 @@ void GeneralOptionsPage::SaveSettings()
 		OnReplaceExplorerSettingChanged(replaceExplorerMode);
 	}
 
-	BOOL savePreferencesToXmlFile =
+	bool savePreferencesToXmlFile =
 		(IsDlgButtonChecked(GetDialog(), IDC_OPTION_XML) == BST_CHECKED);
-	m_coreInterface->SetSavePreferencesToXmlFile(savePreferencesToXmlFile);
+	m_app->SetSavePreferencesToXmlFile(savePreferencesToXmlFile);
 
 	HWND hEdit = GetDlgItem(GetDialog(), IDC_DEFAULT_NEWTABDIR_EDIT);
 	std::wstring newTabDir = GetWindowString(hEdit);
@@ -388,9 +347,18 @@ void GeneralOptionsPage::SaveSettings()
 	}
 
 	HWND comboBox = GetDlgItem(GetDialog(), IDC_OPTIONS_LANGUAGE);
-	int selectedIndex = static_cast<int>(SendMessage(comboBox, CB_GETCURSEL, 0, 0));
-	DWORD language = static_cast<DWORD>(SendMessage(comboBox, CB_GETITEMDATA, selectedIndex, 0));
-	m_config->language = language;
+	auto selectedIndex = static_cast<int>(SendMessage(comboBox, CB_GETCURSEL, 0, 0));
+
+	if (selectedIndex == 0)
+	{
+		// The first item is always the default language.
+		m_config->language = LanguageHelper::DEFAULT_LANGUAGE;
+	}
+	else
+	{
+		auto language = static_cast<WORD>(SendMessage(comboBox, CB_GETITEMDATA, selectedIndex, 0));
+		m_config->language = language;
+	}
 }
 
 void GeneralOptionsPage::OnReplaceExplorerSettingChanged(ReplaceExplorerMode updatedReplaceMode)
@@ -409,14 +377,14 @@ void GeneralOptionsPage::OnReplaceExplorerSettingChanged(ReplaceExplorerMode upd
 
 bool GeneralOptionsPage::UpdateReplaceExplorerSetting(ReplaceExplorerMode updatedReplaceMode)
 {
-	if (updatedReplaceMode != ReplaceExplorerMode::None
-		&& m_config->replaceExplorerMode == ReplaceExplorerMode::None)
+	if (updatedReplaceMode != +ReplaceExplorerMode::None
+		&& m_config->replaceExplorerMode == +ReplaceExplorerMode::None)
 	{
 		std::wstring warningMessage = ResourceHelper::LoadString(m_resourceInstance,
 			IDS_OPTIONS_DIALOG_REPLACE_EXPLORER_WARNING);
 
-		int selectedButton = MessageBox(GetDialog(), warningMessage.c_str(),
-			NExplorerplusplus::APP_NAME, MB_ICONWARNING | MB_YESNO | MB_DEFBUTTON2);
+		int selectedButton = MessageBox(GetDialog(), warningMessage.c_str(), App::APP_NAME,
+			MB_ICONWARNING | MB_YESNO | MB_DEFBUTTON2);
 
 		if (selectedButton == IDNO)
 		{
@@ -482,14 +450,15 @@ bool GeneralOptionsPage::UpdateReplaceExplorerSetting(ReplaceExplorerMode update
 		{
 			std::wstring errorCodeTemplate =
 				ResourceHelper::LoadString(m_resourceInstance, IDS_ERROR_CODE);
-			finalSystemErrorMessage = (boost::wformat(errorCodeTemplate) % res).str();
+			finalSystemErrorMessage =
+				fmt::format(fmt::runtime(errorCodeTemplate), fmt::arg(L"error_code", res));
 		}
 
 		std::wstring errorMessage =
 			ResourceHelper::LoadString(m_resourceInstance, IDS_ERROR_REPLACE_EXPLORER_SETTING)
 			+ L"\n\n" + finalSystemErrorMessage;
 
-		MessageBox(GetDialog(), errorMessage.c_str(), NExplorerplusplus::APP_NAME, MB_ICONWARNING);
+		MessageBox(GetDialog(), errorMessage.c_str(), App::APP_NAME, MB_ICONWARNING);
 
 		return false;
 	}
